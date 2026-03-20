@@ -361,16 +361,20 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	# Get target node's site
 	target_site = get_cluster_attribute(options, target_node, site_attribute)
 	if not target_site:
-		logging.info("No site attribute for target node: %s, fencing only target", target_node)
-		# No site attribute - fence only the target node
-		if set_status_attribute(options, target_node, "terminate", "true"):
-			logging.info("Successfully fenced target node: %s", target_node)
-			return True
-		else:
-			logging.error("Failed to fence target node: %s", target_node)
-			return False
+		logging.info("No site attribute for target node: %s, returning OFF", target_node)
+		logging.info("Single-node fencing will be handled by next device in topology")
+		return False
 
 	logging.info("Target node %s is on site: %s", target_node, target_site)
+
+	# Check target node uptime availability
+	target_uptime = get_node_uptime(options, target_node, join_attribute, supports_in_ccm)
+	if target_uptime is None:
+		logging.info("Uptime unavailable for target node: %s, returning OFF", target_node)
+		logging.info("Single-node fencing will be handled by next device in topology")
+		return False
+
+	logging.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
 	# Phase 1: Identify nodes to fence
 	all_nodes = get_all_cluster_nodes(options)
@@ -415,8 +419,10 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	logging.info("Phase 2: Quorum safety check for %d nodes", nodes_to_fence_count)
 
 	if nodes_to_fence_count == 0:
-		logging.info("No nodes to fence (all filtered by uptime threshold)")
-		return True
+		logging.info("No nodes to fence (all filtered by uptime threshold or unavailable)")
+		logging.info("Cannot perform site-wide fencing, returning OFF")
+		logging.info("Single-node fencing will be handled by next device in topology")
+		return False
 
 	if quorum_safe:
 		if not check_quorum_safety(options, nodes_to_fence_count):
@@ -520,6 +526,11 @@ terminate attributes are set while the real fence operation executes:
 The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps when available, falling back
 to a custom join_attribute for older versions. Use alert-uptime-helper to maintain join times
 on older Pacemaker installations.
+
+Behavior:
+- Returns OFF (failure) when site-attribute is missing → next device handles single-node fencing
+- Returns OFF (failure) when uptime data unavailable → next device handles single-node fencing
+- Only sets terminate attributes when site-wide fencing can be safely performed
 
 Status checking:
 - Only online nodes require terminate=true for status to report "off" (fenced)
