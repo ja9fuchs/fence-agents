@@ -102,6 +102,32 @@ def set_status_attribute(options, node, attribute, value):
 		logging.error("Error: %s", stderr.strip())
 	return False
 
+def delete_status_attribute(options, node, attribute):
+	"""Delete status attribute for a node
+
+	Returns:
+		bool: True on success, False on failure
+	"""
+	node_safe = shlex.quote(node)
+	attr_safe = shlex.quote(attribute)
+	cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --delete --type "status"'
+
+	(rc, stdout, stderr) = run_command(options, cmd)
+
+	if rc == 0:
+		logging.info("Deleted %s for node %s", attribute, node)
+		return True
+
+	# rc=6 means attribute doesn't exist - that's ok
+	if rc == 6:
+		logging.debug("Attribute %s does not exist for node %s (already deleted)", attribute, node)
+		return True
+
+	logging.error("Failed to delete %s for node %s (rc=%d)", attribute, node, rc)
+	if stderr:
+		logging.error("Error: %s", stderr.strip())
+	return False
+
 def check_feature_set(options):
 	"""Check if Pacemaker Feature Set 3.18.0+ is available (supports in_ccm)"""
 	cmd = 'crm_attribute --query --type status --name "#feature-set" --quiet 2>/dev/null'
@@ -249,16 +275,21 @@ def site_fence_test(conn, options):
 	"""
 	action = options["--action"]
 
-	# Handle "on" action (unfencing not supported)
-	if action == "on":
-		logging.info("Unfencing not supported, returning success")
-		return True
-
 	# Get parameters
 	target_node = options.get("--plug")
 	if not target_node:
 		logging.error("No target node specified")
 		return False
+
+	# Handle "on" action - clear terminate attribute
+	if action == "on":
+		logging.info("Unfencing node %s - clearing terminate attribute", target_node)
+		if delete_status_attribute(options, target_node, "terminate"):
+			logging.info("Successfully cleared terminate attribute for node %s", target_node)
+			return True
+		else:
+			logging.error("Failed to clear terminate attribute for node %s", target_node)
+			return False
 
 	site_attribute = options.get("--site-attribute", "site")
 	uptime_threshold = int(options.get("--uptime-threshold", "300"))
@@ -551,11 +582,16 @@ The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps when available, f
 to a custom join_attribute for older versions. Use alert-uptime-helper to maintain join times
 on older Pacemaker installations.
 
+Actions:
+- OFF/REBOOT: Sets terminate attribute for OTHER nodes on same site (NOT the target node)
+- ON: Deletes terminate attribute for the target node (unfencing/cleanup)
+- STATUS: Checks if all online nodes on site have terminate=true
+
 Behavior:
-- Sets terminate attribute for OTHER nodes on same site (NOT the target node)
 - Target node is fenced by the next device in topology (the real fence device)
 - Returns OFF (failure) when site-attribute is missing → next device handles single-node fencing
 - Returns OFF (failure) when uptime data unavailable → next device handles single-node fencing
+- Returns OFF (failure) when target node uptime < threshold → prevents loop after restart
 - Returns success when terminate attributes are set for site nodes
 
 Status checking:
