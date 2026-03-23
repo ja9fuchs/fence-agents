@@ -29,7 +29,7 @@ def get_node_online_status(options, node):
 		return False
 
 	# Parse: "Online: [ node1 node2 node3 ]"
-	online_match = re.search(r'Online:\s*\[(.*?)\]', stdout, re.MULTILINE)
+	online_match = re.search(r'Online:\s*\[(.*?)\]', stdout.strip(), re.MULTILINE)
 	if online_match:
 		online_nodes = online_match.group(1).split()
 		is_online = node in online_nodes
@@ -51,9 +51,11 @@ def get_cluster_attribute(options, node, attribute):
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
-	if rc == 0 and stdout and stdout != "(null)":
-		logging.debug("Node %s attribute %s: %s", node, attribute, stdout)
-		return stdout
+	if rc == 0 and stdout:
+		value = stdout.strip()
+		if value and value != "(null)":
+			logging.debug("Node %s attribute %s: %s", node, attribute, value)
+			return value
 
 	logging.debug("Node %s has no attribute %s", node, attribute)
 	return None
@@ -71,8 +73,10 @@ def get_status_attribute(options, node, attribute):
 	(rc, stdout, stderr) = run_command(options, cmd)
 
 	if rc == 0 and stdout:
-		logging.debug("Node %s status attribute %s: %s", node, attribute, stdout)
-		return stdout
+		value = stdout.strip()
+		if value:
+			logging.debug("Node %s status attribute %s: %s", node, attribute, value)
+			return value
 
 	return None
 
@@ -95,7 +99,7 @@ def set_status_attribute(options, node, attribute, value):
 
 	logging.error("Failed to set %s for node %s (rc=%d)", attribute, node, rc)
 	if stderr:
-		logging.error("Error: %s", stderr)
+		logging.error("Error: %s", stderr.strip())
 	return False
 
 def check_feature_set(options):
@@ -104,17 +108,19 @@ def check_feature_set(options):
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
-	if rc == 0 and stdout and stdout != "(null)":
-		try:
-			parts = stdout.split('.')
-			major = int(parts[0])
-			minor = int(parts[1]) if len(parts) > 1 else 0
+	if rc == 0 and stdout:
+		version = stdout.strip()
+		if version and version != "(null)":
+			try:
+				parts = version.split('.')
+				major = int(parts[0])
+				minor = int(parts[1]) if len(parts) > 1 else 0
 
-			if major > 3 or (major == 3 and minor >= 18):
-				logging.debug("Feature Set %s supports in_ccm", stdout)
-				return True
-		except (ValueError, IndexError) as e:
-			logging.debug("Feature set parse failed: %s", e)
+				if major > 3 or (major == 3 and minor >= 18):
+					logging.debug("Feature Set %s supports in_ccm", version)
+					return True
+			except (ValueError, IndexError) as e:
+				logging.debug("Feature set parse failed: %s", e)
 
 	logging.debug("Feature Set does not support in_ccm, using fallback")
 	return False
@@ -122,12 +128,12 @@ def check_feature_set(options):
 def get_in_ccm_timestamp(options, node):
 	"""Get in_ccm timestamp from CIB for Pacemaker 3.18.0+"""
 	node_safe = shlex.quote(node)
-	cmd = f'cibadmin --query --xpath "//node_state[@uname={node_safe}]" 2>/dev/null'
+	cmd = f'cibadmin --query --xpath "//node_state[@uname={node_safe}]"' # 2>/dev/null'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
 	if rc == 0:
-		match = re.search(r'in_ccm="([^"]*)"', stdout)
+		match = re.search(r'in_ccm="([^"]*)"', stdout.strip())
 		if match and match.group(1) not in ["0", "false"]:
 			return match.group(1)
 
@@ -175,7 +181,7 @@ def get_all_cluster_nodes(options):
 		return []
 
 	nodes = []
-	for line in stdout.split('\n'):
+	for line in stdout.strip().split('\n'):
 		parts = line.split()
 		if len(parts) >= 2:
 			nodes.append(parts[1])
@@ -193,7 +199,7 @@ def get_quorum_status(options):
 	expected_votes = 0
 	quorate = False
 
-	for line in stdout.split('\n'):
+	for line in stdout.strip().split('\n'):
 		if "Expected votes" in line:
 			parts = line.split()
 			if parts:
@@ -391,6 +397,11 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 
 		logging.debug("Checking node: %s", node)
 
+		# Skip the target node - it will be fenced by the real fence device
+		if node == target_node:
+			logging.debug("Node %s is the target, skipping terminate attribute", node)
+			continue
+
 		node_site = get_cluster_attribute(options, node, site_attribute)
 		if node_site != target_site:
 			logging.debug("Node %s on different site (%s), skipping", node, node_site)
@@ -415,44 +426,49 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		nodes_to_fence.append(node)
 
 	# Phase 2: Quorum safety check
-	nodes_to_fence_count = len(nodes_to_fence)
-	logging.info("Phase 2: Quorum safety check for %d nodes", nodes_to_fence_count)
+	# Include target node in count (it will be fenced by real device, not by terminate attribute)
+	total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
+	logging.info("Phase 2: Quorum safety check for %d nodes (%d with terminate + target)",
+		total_nodes_to_fence, len(nodes_to_fence))
 
-	if nodes_to_fence_count == 0:
-		logging.info("No nodes to fence (all filtered by uptime threshold or unavailable)")
-		logging.info("Cannot perform site-wide fencing, returning OFF")
-		logging.info("Single-node fencing will be handled by next device in topology")
-		return False
-
-	if quorum_safe:
-		if not check_quorum_safety(options, nodes_to_fence_count):
+	if len(nodes_to_fence) == 0:
+		logging.info("No other nodes on site require terminate attribute")
+		logging.info("Only target node will be fenced by real device, allowing operation")
+		# Continue - still safe to fence just the target node
+	elif quorum_safe:
+		if not check_quorum_safety(options, total_nodes_to_fence):
 			logging.error("Quorum safety check FAILED - aborting")
 			return False
 	else:
 		logging.info("Quorum safety check DISABLED by configuration")
 
-	# Phase 3: Execute fencing
-	logging.info("Phase 3: Executing fencing for %d nodes", nodes_to_fence_count)
+	# Phase 3: Set terminate attributes (excluding target node)
+	logging.info("Phase 3: Setting terminate for %d site nodes (excluding target)", len(nodes_to_fence))
+
+	if len(nodes_to_fence) == 0:
+		logging.info("No other nodes on site - only target will be fenced by real device")
+		return True
 
 	fenced_count = 0
 	failed_count = 0
 	failed_nodes = []
 
 	for node in nodes_to_fence:
-		logging.info("Fencing node: %s", node)
+		logging.info("Setting terminate for node: %s", node)
 		if set_status_attribute(options, node, "terminate", "true"):
 			fenced_count += 1
 		else:
 			failed_count += 1
 			failed_nodes.append(node)
 
-	logging.info("Site-wide fencing complete: %d fenced, %d failures", fenced_count, failed_count)
+	logging.info("Terminate attributes set: %d succeeded, %d failures", fenced_count, failed_count)
+	logging.info("Target node %s will be fenced by real device", target_node)
 
 	if failed_nodes:
-		logging.error("Failed to fence nodes: %s", ", ".join(failed_nodes))
+		logging.error("Failed to set terminate for nodes: %s", ", ".join(failed_nodes))
 
-	# Return True only if we fenced at least some nodes and no total failure
-	return fenced_count > 0 or failed_count == 0
+	# Return True if we set terminate successfully (or no other nodes to set)
+	return failed_count == 0
 
 def define_new_opts():
 	all_opt["site_attribute"] = {
@@ -515,8 +531,8 @@ def main():
 	docs = {}
 	docs["shortdesc"] = "Fence agent for synchronous site-wide fencing"
 	docs["longdesc"] = """fence_site is a fence agent for synchronous site-wide fencing in Pacemaker clusters.
-When a node is fenced, this agent identifies and fences all other nodes with the same site attribute,
-enabling parallel site-wide fencing instead of sequential per-node fencing.
+When a node is fenced, this agent identifies and sets terminate attributes for OTHER nodes on the same site,
+enabling parallel site-wide fencing. The target node itself is fenced by the real fence device.
 
 IMPORTANT: This agent must be listed BEFORE the real fence device in fencing topology to ensure
 terminate attributes are set while the real fence operation executes:
@@ -528,9 +544,11 @@ to a custom join_attribute for older versions. Use alert-uptime-helper to mainta
 on older Pacemaker installations.
 
 Behavior:
+- Sets terminate attribute for OTHER nodes on same site (NOT the target node)
+- Target node is fenced by the next device in topology (the real fence device)
 - Returns OFF (failure) when site-attribute is missing → next device handles single-node fencing
 - Returns OFF (failure) when uptime data unavailable → next device handles single-node fencing
-- Only sets terminate attributes when site-wide fencing can be safely performed
+- Returns success when terminate attributes are set for site nodes
 
 Status checking:
 - Only online nodes require terminate=true for status to report "off" (fenced)
@@ -538,7 +556,7 @@ Status checking:
 
 Safety features:
 - Uptime threshold: Only fence nodes that have been up for minimum duration (default 5 minutes)
-- Quorum protection: Abort fencing if it would cause loss of cluster quorum
+- Quorum protection: Abort fencing if it would cause loss of cluster quorum (includes target + site nodes)
 - Site isolation: Only fence nodes matching the target node's site attribute
 - Command injection protection: All parameters are properly escaped"""
 	docs["vendorurl"] = "https://github.com/ClusterLabs"
