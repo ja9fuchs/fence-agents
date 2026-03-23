@@ -382,6 +382,14 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 
 	logging.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
+	# Check if target node uptime is below threshold
+	if target_uptime < uptime_threshold:
+		logging.info("Target node %s uptime %ds < threshold %ds, returning OFF",
+			target_node, target_uptime, uptime_threshold)
+		logging.info("Node recently restarted - skipping site-wide fencing")
+		logging.info("Single-node fencing will be handled by next device in topology")
+		return False
+
 	# Phase 1: Identify nodes to fence
 	all_nodes = get_all_cluster_nodes(options)
 	if not all_nodes:
