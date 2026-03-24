@@ -399,6 +399,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	target_site = get_cluster_attribute(options, target_node, site_attribute)
 	if not target_site:
 		logging.info("No site attribute for target node: %s, returning OFF", target_node)
+		# Clean up any stale terminate attributes
+		delete_status_attribute(options, target_node, "terminate")
 		logging.info("Single-node fencing will be handled by next device in topology")
 		return False
 
@@ -408,6 +410,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	target_uptime = get_node_uptime(options, target_node, join_attribute, supports_in_ccm)
 	if target_uptime is None:
 		logging.info("Uptime unavailable for target node: %s, returning OFF", target_node)
+		# Clean up any stale terminate attributes
+		delete_status_attribute(options, target_node, "terminate")
 		logging.info("Single-node fencing will be handled by next device in topology")
 		return False
 
@@ -418,6 +422,12 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		logging.info("Target node %s uptime %ds < threshold %ds, returning OFF",
 			target_node, target_uptime, uptime_threshold)
 		logging.info("Node recently restarted - skipping site-wide fencing")
+
+		# Clean up any stale terminate attributes for the target node
+		# This prevents re-fencing loops when nodes rejoin after being fenced as peers
+		logging.info("Clearing stale terminate attribute for recently restarted node")
+		delete_status_attribute(options, target_node, "terminate")
+
 		logging.info("Single-node fencing will be handled by next device in topology")
 		return False
 
