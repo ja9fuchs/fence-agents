@@ -16,11 +16,8 @@ from fencing import fail, fail_usage, run_command, fence_action, all_opt
 from fencing import atexit_handler, check_input, process_input, show_docs
 from fencing import run_delay, EC_GENERIC_ERROR, SyslogLibHandler
 
-# Configure logging to syslog
+# Get logger instance (will be configured in main() after fencing library initializes)
 logger = logging.getLogger()
-logger.propagate = False
-logger.setLevel(logging.INFO)
-logger.addHandler(SyslogLibHandler())
 
 def get_node_online_status(options, node):
 	"""Check if node is online in cluster using crm_mon
@@ -582,6 +579,13 @@ def main():
 	all_opt["shell_timeout"]["default"] = "30"
 
 	options = check_input(device_opt, process_input(device_opt))
+
+	# Configure logging: remove fencing library's stderr handlers, use only syslog
+	# This prevents duplicates and logs at proper levels (not as warnings)
+	logger.handlers.clear()
+	logger.propagate = False
+	logger.setLevel(logging.INFO)
+	logger.addHandler(SyslogLibHandler())
 
 	docs = {}
 	docs["shortdesc"] = "Fence agent for synchronous site-wide fencing"
