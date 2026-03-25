@@ -294,10 +294,10 @@ def site_fence_test(conn, options):
 			logger.error("Failed to clear terminate attribute for node %s", target_node)
 			return False
 
-	site_attribute = options.get("--site-attribute", "site")
-	uptime_threshold = int(options.get("--uptime-threshold", "300"))
-	join_attribute = options.get("--join-attribute", "node_join_time")
-	quorum_safe = options.get("--quorum-safe", "true").lower() in ["1", "yes", "on", "true"]
+	site_attribute = options.get("--site-attribute")
+	uptime_threshold = int(options.get("--uptime-threshold"))
+	join_attribute = options.get("--join-attribute")
+	quorum_safe = options.get("--quorum-safe").lower() in ["1", "yes", "on", "true"]
 
 	# Validate uptime threshold
 	if uptime_threshold < 0:
