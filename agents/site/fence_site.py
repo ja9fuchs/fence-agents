@@ -95,7 +95,7 @@ def get_cluster_attribute(options, node, attribute):
 	"""
 	node_safe = shlex.quote(node)
 	attr_safe = shlex.quote(attribute)
-	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --quiet 2>/dev/null'
+	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --quiet'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
@@ -116,7 +116,7 @@ def get_status_attribute(options, node, attribute):
 	"""
 	node_safe = shlex.quote(node)
 	attr_safe = shlex.quote(attribute)
-	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --type "status" --quiet 2>/dev/null'
+	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --type "status" --quiet'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
@@ -178,7 +178,7 @@ def delete_status_attribute(options, node, attribute):
 
 def check_feature_set(options):
 	"""Check if Pacemaker Feature Set 3.18.0+ is available (supports in_ccm)"""
-	cmd = 'crm_attribute --query --type status --name "#feature-set" --quiet 2>/dev/null'
+	cmd = 'crm_attribute --query --type status --name "#feature-set" --quiet'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
@@ -202,7 +202,7 @@ def check_feature_set(options):
 def get_in_ccm_timestamp(options, node):
 	"""Get in_ccm timestamp from CIB for Pacemaker 3.18.0+"""
 	node_safe = shlex.quote(node)
-	cmd = f'cibadmin --query --xpath "//node_state[@uname={node_safe}]"' # 2>/dev/null'
+	cmd = f'cibadmin --query --xpath "//node_state[@uname=\'{node_safe}\']"'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
@@ -458,7 +458,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		# Clean up any stale terminate attributes
 		delete_status_attribute(options, target_node, "terminate")
 		logger.info("Single-node fencing will be handled by next device in topology")
-		return False
+		return True
 
 	logger.info("Target node %s is on site: %s", target_node, target_site)
 
@@ -469,7 +469,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		# Clean up any stale terminate attributes
 		delete_status_attribute(options, target_node, "terminate")
 		logger.info("Single-node fencing will be handled by next device in topology")
-		return False
+		return True
 
 	logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
