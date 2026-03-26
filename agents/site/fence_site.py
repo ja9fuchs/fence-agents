@@ -465,16 +465,9 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	# Check target node uptime availability
 	target_uptime = get_node_uptime(options, target_node, join_attribute, supports_in_ccm)
 	if target_uptime is None:
-		logger.info("Uptime unavailable for target node: %s, returning OFF", target_node)
-		# Clean up any stale terminate attributes
-		delete_status_attribute(options, target_node, "terminate")
-		logger.info("Single-node fencing will be handled by next device in topology")
-		return True
-
-	logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
-
-	# Check if target node uptime is below threshold
-	if target_uptime < uptime_threshold:
+		logger.warning("Uptime unavailable for target node: %s, cannot verify threshold", target_node)
+		logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
+	elif target_uptime < uptime_threshold:
 		logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
 			target_node, target_uptime, uptime_threshold)
 		logger.info("Node recently restarted - skipping site-wide fencing")
@@ -487,6 +480,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		logger.info("Single-node fencing will be handled by next device in topology")
 		logger.info("Returning success - topology will proceed to next level")
 		return True
+	else:
+		logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
 	# Phase 1: Identify nodes to fence
 	# Get all node sites in one query (optimization: single CIB query)
