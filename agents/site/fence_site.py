@@ -53,7 +53,7 @@ def get_all_node_sites(options, site_attribute):
 		dict: {node_name: site_value} mapping (empty dict on error)
 	"""
 	attr_safe = shlex.quote(site_attribute)
-	cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
+	cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name=\'{attr_safe}\']]]"'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
@@ -230,8 +230,10 @@ def get_node_uptime(options, node, join_attribute, supports_in_ccm):
 				return uptime
 			except ValueError:
 				logger.warning("Invalid in_ccm timestamp for node %s: %s", node, in_ccm)
+		logger.debug("Node %s uptime unavailable (in_ccm not found)", node)
+		return None
 
-	# Fallback to join_attribute
+	# Use join_attribute only if in_ccm not available
 	value = get_cluster_attribute(options, node, join_attribute)
 	if value:
 		try:
@@ -395,17 +397,20 @@ def get_site_status(options, target_node, site_attribute):
 		logger.debug("No nodes found on site %s, returning on", target_site)
 		return True  # on = not fenced
 
-	logger.debug("Checking status for %d nodes on site %s", len(site_nodes), target_site)
+	# Check status of peer nodes on site (exclude target - it's fenced by real device)
+	peer_nodes = [n for n in site_nodes if n != target_node]
+	logger.debug("Checking status for %d peer nodes on site %s (excluding target %s)",
+		len(peer_nodes), target_site, target_node)
 
 	# Get all online nodes once (optimization: single crm_mon call)
 	online_nodes = get_all_online_nodes(options)
 
-	# Check status of all nodes on site
+	# Check terminate status of peer nodes
 	online_nodes_total = 0
 	online_nodes_terminated = 0
 	offline_nodes = 0
 
-	for node in site_nodes:
+	for node in peer_nodes:
 		if node in online_nodes:
 			online_nodes_total += 1
 			terminate = get_status_attribute(options, node, "terminate")
@@ -418,20 +423,20 @@ def get_site_status(options, target_node, site_attribute):
 			offline_nodes += 1
 			logger.debug("Node %s is OFFLINE, skipping terminate check", node)
 
-	logger.debug("Site %s status: %d/%d online nodes terminated, %d offline",
+	logger.debug("Site %s status (peer nodes only): %d/%d online terminated, %d offline",
 		target_site, online_nodes_terminated, online_nodes_total, offline_nodes)
 
-	# Return False (off/fenced) if all online nodes are terminated
+	# Return False (off/fenced) if all online peer nodes are terminated
 	if online_nodes_total > 0 and online_nodes_terminated == online_nodes_total:
-		logger.debug("All online nodes terminated, returning off")
+		logger.debug("All online peer nodes terminated, returning off")
 		return False  # off = fenced
 
 	if online_nodes_total == 0 and offline_nodes > 0:
-		# All nodes offline - site is down
-		logger.debug("All nodes offline, returning off")
+		# All peer nodes offline - site is down
+		logger.debug("All peer nodes offline, returning off")
 		return False  # off = fenced
 
-	logger.debug("Not all online nodes terminated, returning on")
+	logger.debug("Not all online peer nodes terminated, returning on")
 	return True  # on = not fenced
 
 def execute_site_fence(options, target_node, site_attribute, uptime_threshold, join_attribute, quorum_safe):
@@ -480,7 +485,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		delete_status_attribute(options, target_node, "terminate")
 
 		logger.info("Single-node fencing will be handled by next device in topology")
-		return False
+		logger.info("Returning success - topology will proceed to next level")
+		return True
 
 	# Phase 1: Identify nodes to fence
 	# Get all node sites in one query (optimization: single CIB query)
