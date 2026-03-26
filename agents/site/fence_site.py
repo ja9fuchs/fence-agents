@@ -58,7 +58,7 @@ def get_all_node_sites(options, site_attribute):
 	(rc, stdout, stderr) = run_command(options, cmd)
 
 	if rc != 0:
-		logger.debug("Failed to query node sites (rc=%d), falling back to per-node queries", rc)
+		logger.warning("Failed to query node sites (rc=%d)", rc)
 		return {}
 
 	node_sites = {}
@@ -389,13 +389,7 @@ def get_site_status(options, target_node, site_attribute):
 
 	# Get all node sites in one query (optimization: single CIB query)
 	node_sites = get_all_node_sites(options, site_attribute)
-	if node_sites:
-		# Use batch query results
-		site_nodes = [n for n, s in node_sites.items() if s == target_site]
-	else:
-		# Fallback to individual queries if batch failed
-		all_nodes = get_all_cluster_nodes(options)
-		site_nodes = [n for n in all_nodes if get_cluster_attribute(options, n, site_attribute) == target_site]
+	site_nodes = [n for n, s in node_sites.items() if s == target_site]
 
 	if not site_nodes:
 		logger.debug("No nodes found on site %s, returning on", target_site)
@@ -491,21 +485,6 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	# Phase 1: Identify nodes to fence
 	# Get all node sites in one query (optimization: single CIB query)
 	node_sites = get_all_node_sites(options, site_attribute)
-
-	if not node_sites:
-		# Fallback: get all nodes and query individually
-		logger.debug("Batch site query failed, using per-node queries")
-		all_nodes = get_all_cluster_nodes(options)
-		if not all_nodes:
-			logger.error("Failed to retrieve cluster node list")
-			return False
-		# Build node_sites dict with individual queries
-		node_sites = {}
-		for node in all_nodes:
-			if node:
-				site = get_cluster_attribute(options, node, site_attribute)
-				if site:
-					node_sites[node] = site
 
 	nodes_to_fence = []
 	logger.info("Phase 1: Identifying nodes to fence")
