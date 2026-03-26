@@ -537,19 +537,25 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	else:
 		logger.info("Quorum safety check DISABLED by configuration")
 
-	# Phase 3: Set terminate attributes (excluding target node)
-	logger.info("Phase 3: Setting terminate for %d site nodes (excluding target)", len(nodes_to_fence))
-
-	if len(nodes_to_fence) == 0:
-		logger.info("No other nodes on site - only target will be fenced by real device")
-		return True
+	# Phase 3: Set terminate attributes (including target node)
+	total_nodes = len(nodes_to_fence) + 1  # +1 for target
+	logger.info("Phase 3: Setting terminate for %d site nodes (including target)", total_nodes)
 
 	fenced_count = 0
 	failed_count = 0
 	failed_nodes = []
 
+	# Set terminate for target node
+	logger.info("Setting terminate for target node: %s", target_node)
+	if set_status_attribute(options, target_node, "terminate", "true"):
+		fenced_count += 1
+	else:
+		failed_count += 1
+		failed_nodes.append(target_node)
+
+	# Set terminate for peer nodes
 	for node in nodes_to_fence:
-		logger.info("Setting terminate for node: %s", node)
+		logger.info("Setting terminate for peer node: %s", node)
 		if set_status_attribute(options, node, "terminate", "true"):
 			fenced_count += 1
 		else:
