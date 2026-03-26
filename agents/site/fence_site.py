@@ -11,6 +11,7 @@ import sys
 import logging
 import atexit
 import time
+import xml.etree.ElementTree as ET
 sys.path.append("/usr/share/fence")
 from fencing import fail, fail_usage, run_command, fence_action, all_opt
 from fencing import atexit_handler, check_input, process_input, show_docs
@@ -19,28 +20,72 @@ from fencing import run_delay, EC_GENERIC_ERROR, SyslogLibHandler
 # Get logger instance (will be configured in main() after fencing library initializes)
 logger = logging.getLogger()
 
-def get_node_online_status(options, node):
-	"""Check if node is online in cluster using crm_mon
+def get_all_online_nodes(options):
+	"""Get list of all online nodes (single crm_mon call - optimized)
 
 	Returns:
-		bool: True if node is online, False otherwise
+		set: Set of online node names (empty set on error)
 	"""
 	(rc, stdout, stderr) = run_command(options, "crm_mon -1")
 
 	if rc != 0:
 		logger.warning("crm_mon failed (rc=%d)", rc)
-		return False
+		return set()
 
 	# Parse: "Online: [ node1 node2 node3 ]"
 	online_match = re.search(r'Online:\s*\[(.*?)\]', stdout.strip(), re.MULTILINE)
 	if online_match:
-		online_nodes = online_match.group(1).split()
-		is_online = node in online_nodes
-		logger.debug("Node %s is %s", node, "ONLINE" if is_online else "OFFLINE")
-		return is_online
+		online_nodes = set(online_match.group(1).split())
+		logger.debug("Online nodes: %s", ', '.join(sorted(online_nodes)))
+		return online_nodes
 
 	logger.debug("No online nodes found in crm_mon output")
-	return False
+	return set()
+
+def get_all_node_sites(options, site_attribute):
+	"""Get site attribute for all nodes (single CIB query - optimized)
+
+	Args:
+		options: Options dictionary
+		site_attribute: Name of the site attribute to query
+
+	Returns:
+		dict: {node_name: site_value} mapping (empty dict on error)
+	"""
+	attr_safe = shlex.quote(site_attribute)
+	cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
+
+	(rc, stdout, stderr) = run_command(options, cmd)
+
+	if rc != 0:
+		logger.debug("Failed to query node sites (rc=%d), falling back to per-node queries", rc)
+		return {}
+
+	node_sites = {}
+	try:
+		# Parse XML output
+		root = ET.fromstring(stdout)
+
+		# Find all node elements
+		for node in root.findall('.//node'):
+			node_name = node.get('uname')
+			if not node_name:
+				continue
+
+			# Find the site attribute value
+			for nvpair in node.findall('.//nvpair'):
+				if nvpair.get('name') == site_attribute:
+					site_value = nvpair.get('value')
+					if site_value:
+						node_sites[node_name] = site_value
+						logger.debug("Node %s site: %s", node_name, site_value)
+					break
+	except ET.ParseError as e:
+		logger.warning("Failed to parse CIB XML: %s", e)
+		return {}
+
+	logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
+	return node_sites
 
 def get_cluster_attribute(options, node, attribute):
 	"""Get cluster attribute for a node
@@ -342,9 +387,15 @@ def get_site_status(options, target_node, site_attribute):
 		logger.debug("Node %s has no terminate, returning on", target_node)
 		return True  # on = not fenced
 
-	# Get all nodes on the same site
-	all_nodes = get_all_cluster_nodes(options)
-	site_nodes = [n for n in all_nodes if get_cluster_attribute(options, n, site_attribute) == target_site]
+	# Get all node sites in one query (optimization: single CIB query)
+	node_sites = get_all_node_sites(options, site_attribute)
+	if node_sites:
+		# Use batch query results
+		site_nodes = [n for n, s in node_sites.items() if s == target_site]
+	else:
+		# Fallback to individual queries if batch failed
+		all_nodes = get_all_cluster_nodes(options)
+		site_nodes = [n for n in all_nodes if get_cluster_attribute(options, n, site_attribute) == target_site]
 
 	if not site_nodes:
 		logger.debug("No nodes found on site %s, returning on", target_site)
@@ -352,13 +403,16 @@ def get_site_status(options, target_node, site_attribute):
 
 	logger.debug("Checking status for %d nodes on site %s", len(site_nodes), target_site)
 
+	# Get all online nodes once (optimization: single crm_mon call)
+	online_nodes = get_all_online_nodes(options)
+
 	# Check status of all nodes on site
 	online_nodes_total = 0
 	online_nodes_terminated = 0
 	offline_nodes = 0
 
 	for node in site_nodes:
-		if get_node_online_status(options, node):
+		if node in online_nodes:
 			online_nodes_total += 1
 			terminate = get_status_attribute(options, node, "terminate")
 			if terminate and terminate.lower() in ["true", "1"]:
@@ -435,18 +489,28 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		return False
 
 	# Phase 1: Identify nodes to fence
-	all_nodes = get_all_cluster_nodes(options)
-	if not all_nodes:
-		logger.error("Failed to retrieve cluster node list")
-		return False
+	# Get all node sites in one query (optimization: single CIB query)
+	node_sites = get_all_node_sites(options, site_attribute)
+
+	if not node_sites:
+		# Fallback: get all nodes and query individually
+		logger.debug("Batch site query failed, using per-node queries")
+		all_nodes = get_all_cluster_nodes(options)
+		if not all_nodes:
+			logger.error("Failed to retrieve cluster node list")
+			return False
+		# Build node_sites dict with individual queries
+		node_sites = {}
+		for node in all_nodes:
+			if node:
+				site = get_cluster_attribute(options, node, site_attribute)
+				if site:
+					node_sites[node] = site
 
 	nodes_to_fence = []
 	logger.info("Phase 1: Identifying nodes to fence")
 
-	for node in all_nodes:
-		if not node:
-			continue
-
+	for node, node_site in node_sites.items():
 		logger.debug("Checking node: %s", node)
 
 		# Skip the target node - it will be fenced by the real fence device
@@ -454,7 +518,6 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 			logger.debug("Node %s is the target, skipping terminate attribute", node)
 			continue
 
-		node_site = get_cluster_attribute(options, node, site_attribute)
 		if node_site != target_site:
 			logger.debug("Node %s on different site (%s), skipping", node, node_site)
 			continue
