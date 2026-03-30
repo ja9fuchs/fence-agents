@@ -176,53 +176,61 @@ def delete_status_attribute(options, node, attribute):
 		logger.error("Error: %s", stderr.strip())
 	return False
 
-def check_feature_set(options):
-	"""Check if Pacemaker Feature Set 3.18.0+ is available (supports in_ccm)"""
-	cmd = 'crm_attribute --query --type status --name "#feature-set" --quiet'
+def get_all_node_states(options):
+	"""Query all node_state elements from CIB (single query - optimized)
+
+	Returns:
+		dict: {node_name: ET.Element} mapping (empty dict on error)
+	"""
+	cmd = 'cibadmin --query --xpath "//node_state"'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
-	if rc == 0 and stdout:
-		version = stdout.strip()
-		if version and version != "(null)":
-			try:
-				parts = version.split('.')
-				major = int(parts[0])
-				minor = int(parts[1]) if len(parts) > 1 else 0
+	if rc != 0:
+		logger.debug("Failed to query node_state (rc=%d)", rc)
+		return {}
 
-				if major > 3 or (major == 3 and minor >= 18):
-					logger.debug("Feature Set %s supports in_ccm", version)
-					return True
-			except (ValueError, IndexError) as e:
-				logger.debug("Feature set parse failed: %s", e)
+	node_states = {}
+	try:
+		root = ET.fromstring(stdout)
 
-	logger.debug("Feature Set does not support in_ccm, using fallback")
-	return False
+		# Handle both single node_state and multiple wrapped in a parent
+		if root.tag == 'node_state':
+			# Single node_state element
+			node_name = root.get('uname')
+			if node_name:
+				node_states[node_name] = root
+		else:
+			# Multiple node_state elements
+			for node_state in root.findall('.//node_state'):
+				node_name = node_state.get('uname')
+				if node_name:
+					node_states[node_name] = node_state
 
-def get_in_ccm_timestamp(options, node):
-	"""Get in_ccm timestamp from CIB for Pacemaker 3.18.0+"""
-	node_safe = shlex.quote(node)
-	cmd = f'cibadmin --query --xpath "//node_state[@uname=\'{node_safe}\']"'
+		logger.debug("Queried %d node_state elements", len(node_states))
+		return node_states
 
-	(rc, stdout, stderr) = run_command(options, cmd)
+	except ET.ParseError as e:
+		logger.warning("Failed to parse node_state XML: %s", e)
+		return {}
 
-	if rc == 0:
-		match = re.search(r'in_ccm="([^"]*)"', stdout.strip())
-		if match and match.group(1) not in ["0", "false"]:
-			return match.group(1)
-
-	return None
-
-def get_node_uptime(options, node, join_attribute, supports_in_ccm):
+def get_node_uptime(options, node, join_attribute, node_states):
 	"""Get node uptime in seconds
+
+	Args:
+		options: Options dictionary
+		node: Node name to check
+		join_attribute: Fallback join attribute name
+		node_states: Dict from get_all_node_states() {node_name: ET.Element}
 
 	Returns:
 		int or None: Uptime in seconds, or None if unavailable
 	"""
-	# Try Feature Set 3.18.0+ in_ccm first
-	if supports_in_ccm:
-		in_ccm = get_in_ccm_timestamp(options, node)
-		if in_ccm:
+	# Try in_ccm from node_state first
+	if node in node_states:
+		node_state = node_states[node]
+		in_ccm = node_state.get('in_ccm')
+		if in_ccm and in_ccm not in ["0", "false"]:
 			try:
 				current_time = int(time.time())
 				uptime = current_time - int(in_ccm)
@@ -230,10 +238,8 @@ def get_node_uptime(options, node, join_attribute, supports_in_ccm):
 				return uptime
 			except ValueError:
 				logger.warning("Invalid in_ccm timestamp for node %s: %s", node, in_ccm)
-		logger.debug("Node %s uptime unavailable (in_ccm not found)", node)
-		return None
 
-	# Use join_attribute only if in_ccm not available
+	# Fall back to join_attribute if in_ccm not available
 	value = get_cluster_attribute(options, node, join_attribute)
 	if value:
 		try:
@@ -448,8 +454,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	logger.info("Starting site-wide fencing for target: %s", target_node)
 	logger.info("Site attribute: %s, uptime threshold: %ds", site_attribute, uptime_threshold)
 
-	# Cache feature set check
-	supports_in_ccm = check_feature_set(options)
+	# Query all node states once (optimization: single CIB query)
+	node_states = get_all_node_states(options)
 
 	# Get target node's site
 	target_site = get_cluster_attribute(options, target_node, site_attribute)
@@ -463,7 +469,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	logger.info("Target node %s is on site: %s", target_node, target_site)
 
 	# Check target node uptime availability
-	target_uptime = get_node_uptime(options, target_node, join_attribute, supports_in_ccm)
+	target_uptime = get_node_uptime(options, target_node, join_attribute, node_states)
 	if target_uptime is None:
 		logger.warning("Uptime unavailable for target node: %s, cannot verify threshold", target_node)
 		logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
@@ -505,7 +511,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		logger.info("Node %s is on same site as target (%s)", node, target_site)
 
 		# Check uptime threshold
-		node_uptime = get_node_uptime(options, node, join_attribute, supports_in_ccm)
+		node_uptime = get_node_uptime(options, node, join_attribute, node_states)
 		if node_uptime is None:
 			logger.info("Node %s: uptime unavailable, skipping for safety", node)
 			continue
@@ -645,7 +651,7 @@ enabling parallel site-wide fencing. The target node itself is fenced by the rea
 IMPORTANT: This agent must be listed BEFORE the real fence device in fencing topology to ensure
 terminate attributes are set while the real fence operation executes:
 
-  pcs stonith level add 1 &lt;node&gt; fence-site,&lt;real-fence-device&gt;
+  pcs stonith level add 1 NODE fence-site REAL-FENCE-DEVICE
 
 The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps when available, falling back
 to a custom join_attribute for older versions. Use alert-uptime-helper to maintain join times
