@@ -601,7 +601,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	# Phase 2: Quorum safety check
 	# Include target node in count (it will be fenced by real device, not by terminate attribute)
 	total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
-	logger.info("Phase 2: Quorum safety check for %d nodes (%d with terminate + target)",
+	logger.info("Phase 2: Quorum safety check for %d nodes (target + %d peers)",
 		total_nodes_to_fence, len(nodes_to_fence))
 
 	if len(nodes_to_fence) == 0:
