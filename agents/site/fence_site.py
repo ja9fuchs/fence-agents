@@ -20,6 +20,12 @@ from fencing import run_delay, EC_GENERIC_ERROR, SyslogLibHandler
 # Get logger instance (will be configured in main() after fencing library initializes)
 logger = logging.getLogger()
 
+# Global cache for node_states (populated once per execution)
+_node_states_cache = None
+
+# Global cache for join attributes (populated on first access)
+_join_attributes_cache = None
+
 def get_all_online_nodes(options):
 	"""Get list of all online nodes (single crm_mon call - optimized)
 
@@ -87,46 +93,66 @@ def get_all_node_sites(options, site_attribute):
 	logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
 	return node_sites
 
-def get_cluster_attribute(options, node, attribute):
-	"""Get cluster attribute for a node
+def get_all_join_attributes(options, join_attribute):
+	"""Get join attribute for all nodes (single CIB query - optimized)
+
+	Populates global _join_attributes_cache for access by other functions
+
+	Args:
+		options: Options dictionary
+		join_attribute: Name of the join attribute to query
 
 	Returns:
-		str or None: Attribute value, or None if not found
+		dict: {node_name: join_value} mapping (empty dict on error)
 	"""
-	node_safe = shlex.quote(node)
-	attr_safe = shlex.quote(attribute)
-	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --quiet'
+	global _join_attributes_cache
+
+	attr_safe = shlex.quote(join_attribute)
+	cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
-	if rc == 0 and stdout:
-		value = stdout.strip()
-		if value and value != "(null)":
-			logger.debug("Node %s attribute %s: %s", node, attribute, value)
-			return value
+	if rc != 0:
+		logger.debug("Failed to query join attributes (rc=%d)", rc)
+		_join_attributes_cache = {}
+		return {}
 
-	logger.debug("Node %s has no attribute %s", node, attribute)
-	return None
+	join_attrs = {}
+	try:
+		# Parse XML output
+		root = ET.fromstring(stdout)
 
-def get_status_attribute(options, node, attribute):
-	"""Get status attribute for a node
+		# Find all node elements
+		for node in root.findall('.//node'):
+			node_name = node.get('uname')
+			if not node_name:
+				continue
+
+			# Find the join attribute value
+			for nvpair in node.findall('.//nvpair'):
+				if nvpair.get('name') == join_attribute:
+					join_value = nvpair.get('value')
+					if join_value:
+						join_attrs[node_name] = join_value
+						logger.debug("Node %s %s: %s", node_name, join_attribute, join_value)
+					break
+	except ET.ParseError as e:
+		logger.warning("Failed to parse join attributes XML: %s", e)
+		_join_attributes_cache = {}
+		return {}
+
+	logger.debug("Batch query found %d nodes with join attribute", len(join_attrs))
+	_join_attributes_cache = join_attrs
+	return join_attrs
+
+def get_cached_join_attributes():
+	"""Get cached join attributes from global cache
 
 	Returns:
-		str or None: Attribute value, or None if not found
+		dict: {node_name: join_value} mapping (empty dict if not cached)
 	"""
-	node_safe = shlex.quote(node)
-	attr_safe = shlex.quote(attribute)
-	cmd = f'crm_attribute --node {node_safe} --query --name {attr_safe} --type "status" --quiet'
-
-	(rc, stdout, stderr) = run_command(options, cmd)
-
-	if rc == 0 and stdout:
-		value = stdout.strip()
-		if value:
-			logger.debug("Node %s status attribute %s: %s", node, attribute, value)
-			return value
-
-	return None
+	global _join_attributes_cache
+	return _join_attributes_cache if _join_attributes_cache is not None else {}
 
 def set_status_attribute(options, node, attribute, value):
 	"""Set status attribute for a node
@@ -179,15 +205,20 @@ def delete_status_attribute(options, node, attribute):
 def get_all_node_states(options):
 	"""Query all node_state elements from CIB (single query - optimized)
 
+	Populates global _node_states_cache for access by other functions
+
 	Returns:
 		dict: {node_name: ET.Element} mapping (empty dict on error)
 	"""
+	global _node_states_cache
+
 	cmd = 'cibadmin --query --xpath "//node_state"'
 
 	(rc, stdout, stderr) = run_command(options, cmd)
 
 	if rc != 0:
 		logger.debug("Failed to query node_state (rc=%d)", rc)
+		_node_states_cache = {}
 		return {}
 
 	node_states = {}
@@ -208,25 +239,55 @@ def get_all_node_states(options):
 					node_states[node_name] = node_state
 
 		logger.debug("Queried %d node_state elements", len(node_states))
+		_node_states_cache = node_states
 		return node_states
 
 	except ET.ParseError as e:
 		logger.warning("Failed to parse node_state XML: %s", e)
+		_node_states_cache = {}
 		return {}
 
-def get_node_uptime(options, node, join_attribute, node_states):
+def get_cached_node_states():
+	"""Get cached node_states from global cache
+
+	Returns:
+		dict: {node_name: ET.Element} mapping (empty dict if not cached)
+	"""
+	global _node_states_cache
+	return _node_states_cache if _node_states_cache is not None else {}
+
+def get_terminate_from_node_state(node_state):
+	"""Extract terminate status attribute from node_state Element
+
+	Args:
+		node_state: ET.Element of node_state
+
+	Returns:
+		str or None: Terminate value or None if not found
+	"""
+	if node_state is None:
+		return None
+
+	# Navigate: node_state -> transient_attributes -> instance_attributes -> nvpair[@name='terminate']
+	for nvpair in node_state.findall('.//transient_attributes/instance_attributes/nvpair'):
+		if nvpair.get('name') == 'terminate':
+			return nvpair.get('value')
+
+	return None
+
+def get_node_uptime(options, node, join_attribute):
 	"""Get node uptime in seconds
 
 	Args:
 		options: Options dictionary
 		node: Node name to check
 		join_attribute: Fallback join attribute name
-		node_states: Dict from get_all_node_states() {node_name: ET.Element}
 
 	Returns:
 		int or None: Uptime in seconds, or None if unavailable
 	"""
 	# Try in_ccm from node_state first
+	node_states = get_cached_node_states()
 	if node in node_states:
 		node_state = node_states[node]
 		in_ccm = node_state.get('in_ccm')
@@ -240,7 +301,13 @@ def get_node_uptime(options, node, join_attribute, node_states):
 				logger.warning("Invalid in_ccm timestamp for node %s: %s", node, in_ccm)
 
 	# Fall back to join_attribute if in_ccm not available
-	value = get_cluster_attribute(options, node, join_attribute)
+	# Use cached join attributes (lazy load on first access)
+	join_attrs = get_cached_join_attributes()
+	if not join_attrs:
+		# First access - populate cache
+		join_attrs = get_all_join_attributes(options, join_attribute)
+
+	value = join_attrs.get(node)
 	if value:
 		try:
 			join_time = int(value)
@@ -383,20 +450,24 @@ def get_site_status(options, target_node, site_attribute):
 	"""
 	logger.debug("Status check for node %s", target_node)
 
-	# Get target node's site
-	target_site = get_cluster_attribute(options, target_node, site_attribute)
+	# Query all node states once (optimization: single CIB query)
+	get_all_node_states(options)
+	node_states = get_cached_node_states()
+
+	# Get all node sites in one query (optimization: single CIB query)
+	node_sites = get_all_node_sites(options, site_attribute)
+
+	# Get target node's site from batch query result
+	target_site = node_sites.get(target_node)
 	if not target_site:
 		logger.debug("Node %s has no site attribute, checking only target", target_node)
 		# Fallback: check only target node
-		terminate = get_status_attribute(options, target_node, "terminate")
+		terminate = get_terminate_from_node_state(node_states.get(target_node))
 		if terminate and terminate.lower() in ["true", "1"]:
 			logger.debug("Node %s has terminate=true, returning off", target_node)
 			return False  # off = fenced
 		logger.debug("Node %s has no terminate, returning on", target_node)
 		return True  # on = not fenced
-
-	# Get all node sites in one query (optimization: single CIB query)
-	node_sites = get_all_node_sites(options, site_attribute)
 	site_nodes = [n for n, s in node_sites.items() if s == target_site]
 
 	if not site_nodes:
@@ -419,7 +490,7 @@ def get_site_status(options, target_node, site_attribute):
 	for node in peer_nodes:
 		if node in online_nodes:
 			online_nodes_total += 1
-			terminate = get_status_attribute(options, node, "terminate")
+			terminate = get_terminate_from_node_state(node_states.get(node))
 			if terminate and terminate.lower() in ["true", "1"]:
 				online_nodes_terminated += 1
 				logger.debug("Node %s (ONLINE) has terminate=true", node)
@@ -455,10 +526,13 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	logger.info("Site attribute: %s, uptime threshold: %ds", site_attribute, uptime_threshold)
 
 	# Query all node states once (optimization: single CIB query)
-	node_states = get_all_node_states(options)
+	get_all_node_states(options)
 
-	# Get target node's site
-	target_site = get_cluster_attribute(options, target_node, site_attribute)
+	# Get all node sites in one query (optimization: single CIB query)
+	node_sites = get_all_node_sites(options, site_attribute)
+
+	# Get target node's site from batch query result
+	target_site = node_sites.get(target_node)
 	if not target_site:
 		logger.info("No site attribute for target node: %s, returning OFF", target_node)
 		# Clean up any stale terminate attributes
@@ -469,7 +543,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	logger.info("Target node %s is on site: %s", target_node, target_site)
 
 	# Check target node uptime availability
-	target_uptime = get_node_uptime(options, target_node, join_attribute, node_states)
+	target_uptime = get_node_uptime(options, target_node, join_attribute)
 	if target_uptime is None:
 		logger.warning("Uptime unavailable for target node: %s, cannot verify threshold", target_node)
 		logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
@@ -490,8 +564,6 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
 	# Phase 1: Identify nodes to fence
-	# Get all node sites in one query (optimization: single CIB query)
-	node_sites = get_all_node_sites(options, site_attribute)
 
 	nodes_to_fence = []
 	logger.info("Phase 1: Identifying nodes to fence")
@@ -511,7 +583,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 		logger.info("Node %s is on same site as target (%s)", node, target_site)
 
 		# Check uptime threshold
-		node_uptime = get_node_uptime(options, node, join_attribute, node_states)
+		node_uptime = get_node_uptime(options, node, join_attribute)
 		if node_uptime is None:
 			logger.info("Node %s: uptime unavailable, skipping for safety", node)
 			continue
@@ -547,28 +619,43 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	total_nodes = len(nodes_to_fence) + 1  # +1 for target
 	logger.info("Phase 3: Setting terminate for %d site nodes (including target)", total_nodes)
 
-	fenced_count = 0
+	# Get cached node states to check current terminate values
+	node_states = get_cached_node_states()
+
+	already_set = 0
+	newly_set = 0
 	failed_count = 0
 	failed_nodes = []
 
 	# Set terminate for target node
-	logger.info("Setting terminate for target node: %s", target_node)
-	if set_status_attribute(options, target_node, "terminate", "true"):
-		fenced_count += 1
+	current_terminate = get_terminate_from_node_state(node_states.get(target_node))
+	if current_terminate and current_terminate.lower() in ["true", "1"]:
+		logger.info("Target node %s already has terminate=true, skipping", target_node)
+		already_set += 1
 	else:
-		failed_count += 1
-		failed_nodes.append(target_node)
+		logger.info("Setting terminate for target node: %s", target_node)
+		if set_status_attribute(options, target_node, "terminate", "true"):
+			newly_set += 1
+		else:
+			failed_count += 1
+			failed_nodes.append(target_node)
 
 	# Set terminate for peer nodes
 	for node in nodes_to_fence:
-		logger.info("Setting terminate for peer node: %s", node)
-		if set_status_attribute(options, node, "terminate", "true"):
-			fenced_count += 1
+		current_terminate = get_terminate_from_node_state(node_states.get(node))
+		if current_terminate and current_terminate.lower() in ["true", "1"]:
+			logger.info("Peer node %s already has terminate=true, skipping", node)
+			already_set += 1
 		else:
-			failed_count += 1
-			failed_nodes.append(node)
+			logger.info("Setting terminate for peer node: %s", node)
+			if set_status_attribute(options, node, "terminate", "true"):
+				newly_set += 1
+			else:
+				failed_count += 1
+				failed_nodes.append(node)
 
-	logger.info("Terminate attributes set: %d succeeded, %d failures", fenced_count, failed_count)
+	logger.info("Terminate attributes: %d already set, %d newly set, %d failures",
+		already_set, newly_set, failed_count)
 	logger.info("Target node %s will be fenced by real device", target_node)
 
 	if failed_nodes:
@@ -666,7 +753,7 @@ Behavior:
 - Target node is fenced by the next device in topology (the real fence device)
 - Returns OFF (failure) when site-attribute is missing → next device handles single-node fencing
 - Returns OFF (failure) when uptime data unavailable → next device handles single-node fencing
-- Returns OFF (failure) when target node uptime < threshold → prevents loop after restart
+- Returns OFF (failure) when target node uptime is lower than threshold → prevents loop after restart
 - Returns success when terminate attributes are set for site nodes
 
 Status checking:
