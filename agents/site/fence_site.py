@@ -418,7 +418,7 @@ def site_fence_test(conn, options):
 	uptime_threshold = int(options.get("--uptime-threshold"))
 	join_attribute = options.get("--join-attribute")
 	quorum_safe = options.get("--quorum-safe").lower() in ["1", "yes", "on", "true"]
-	parallel_fencing = options.get("--parallel-fencing").lower() in ["1", "yes", "on", "true"]
+	force_reschedule = options.get("--force-reschedule").lower() in ["1", "yes", "on", "true"]
 
 	# Validate uptime threshold
 	if uptime_threshold < 0:
@@ -438,7 +438,7 @@ def site_fence_test(conn, options):
 			uptime_threshold,
 			join_attribute,
 			quorum_safe,
-			parallel_fencing
+			force_reschedule
 		)
 
 	logger.warning("Action %s not handled", action)
@@ -518,7 +518,7 @@ def get_site_status(options, target_node, site_attribute):
 	logger.debug("Not all online peer nodes terminated, returning on")
 	return True  # on = not fenced
 
-def execute_site_fence(options, target_node, site_attribute, uptime_threshold, join_attribute, quorum_safe, parallel_fencing):
+def execute_site_fence(options, target_node, site_attribute, uptime_threshold, join_attribute, quorum_safe, force_reschedule):
 	"""Execute site-wide fencing
 
 	Returns:
@@ -526,7 +526,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	"""
 	logger.info("Starting site-wide fencing for target: %s", target_node)
 	logger.info("Site attribute: %s, uptime threshold: %ds, force parallel: %s",
-		site_attribute, uptime_threshold, parallel_fencing)
+		site_attribute, uptime_threshold, force_reschedule)
 
 	# Query all node states once (optimization: single CIB query)
 	get_all_node_states(options)
@@ -666,8 +666,8 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	if failed_nodes:
 		logger.error("Failed to set terminate for nodes: %s", ", ".join(failed_nodes))
 
-	# Return failure if parallel_fencing enabled and any peer nodes have terminate set
-	if parallel_fencing and peer_terminate_new > 0:
+	# Return failure if force_reschedule enabled and any peer nodes have terminate set
+	if force_reschedule and peer_terminate_new > 0:
 		logger.info("Site-wide fencing active - fence_site fails for target node %s", target_node)
 		logger.info("Fencing of %s must be rescheduled after peer nodes are fenced", target_node)
 		return False
@@ -716,10 +716,10 @@ def define_new_opts():
 		"default": "true",
 		"order": 4
 	}
-	all_opt["parallel_fencing"] = {
+	all_opt["force_reschedule"] = {
 		"getopt": ":",
-		"longopt": "parallel-fencing",
-		"help": "--parallel-fencing=[true|false]  Enable parallel fencing mode (fail target when peers need fencing)",
+		"longopt": "force-reschedule",
+		"help": "--force-reschedule=[true|false]  Enable parallel fencing mode (fail target when peers need fencing)",
 		"shortdesc": "Enable parallel fencing",
 		"required": "0",
 		"default": "false",
@@ -736,7 +736,7 @@ def main():
 		"uptime_threshold",
 		"join_attribute",
 		"quorum_safe",
-		"parallel_fencing"
+		"force_reschedule"
 	]
 
 	define_new_opts()
