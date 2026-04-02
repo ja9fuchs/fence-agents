@@ -626,6 +626,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 	newly_set = 0
 	failed_count = 0
 	failed_nodes = []
+	peer_terminate_new = 0  # Track if any peer nodes had terminate set
 
 	# Set terminate for target node
 	current_terminate = get_terminate_from_node_state(node_states.get(target_node))
@@ -650,18 +651,26 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
 			logger.info("Setting terminate for peer node: %s", node)
 			if set_status_attribute(options, node, "terminate", "true"):
 				newly_set += 1
+				peer_terminate_new += 1
 			else:
 				failed_count += 1
 				failed_nodes.append(node)
 
 	logger.info("Terminate attributes: %d already set, %d newly set, %d failures",
 		already_set, newly_set, failed_count)
-	logger.info("Target node %s will be fenced by real device", target_node)
+	logger.info("Peer nodes with terminate: %d", peer_terminate_new)
 
 	if failed_nodes:
 		logger.error("Failed to set terminate for nodes: %s", ", ".join(failed_nodes))
 
-	# Return True if we set terminate successfully (or no other nodes to set)
+	# Return failure if any peer nodes have terminate set (site-wide fencing needed)
+	if peer_terminate_new > 0:
+		logger.info("Site-wide fencing active - fence_site fails for target node %s", target_node)
+		logger.info("Fencing of %s must be rescheduled after peer nodes are fenced", target_node)
+		return False
+
+	# Return success only if no peers and no failures
+	logger.info("No peer nodes on site - target %s will be fenced by next device", target_node)
 	return failed_count == 0
 
 def define_new_opts():
