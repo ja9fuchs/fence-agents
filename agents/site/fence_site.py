@@ -182,10 +182,16 @@ def set_status_attribute(options, node, attribute, value):
     Returns:
         bool: True on success, False on failure
     """
+    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
+
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
     value_safe = shlex.quote(value)
     cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --update {value_safe} --type "status"'
+
+    if dry_run:
+        logger.info("DRY-RUN: Would execute: %s", cmd)
+        return True
 
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
@@ -204,9 +210,15 @@ def delete_status_attribute(options, node, attribute):
     Returns:
         bool: True on success, False on failure
     """
+    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
+
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
     cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --delete --type "status"'
+
+    if dry_run:
+        logger.info("DRY-RUN: Would execute: %s", cmd)
+        return True
 
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
@@ -786,7 +798,13 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
         return False
 
     # Phase 3: Set terminate attributes
-    return set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
+    result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
+
+    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
+    if dry_run:
+        logger.info("DRY-RUN: Would return %s", "SUCCESS" if result else "FAILURE")
+
+    return result
 
 def define_new_opts():
     all_opt["site_attribute"] = {
@@ -834,6 +852,15 @@ def define_new_opts():
         "default": "false",
         "order": 5
     }
+    all_opt["dry_run"] = {
+        "getopt": ":",
+        "longopt": "dry-run",
+        "help": "--dry-run=[true|false]        Log actions without executing (testing only)",
+        "shortdesc": "Dry-run mode",
+        "required": "0",
+        "default": "false",
+        "order": 6
+    }
 
 def main():
     device_opt = [
@@ -845,7 +872,8 @@ def main():
         "uptime_threshold",
         "join_attribute",
         "quorum_safe",
-        "force_reschedule"
+        "force_reschedule",
+        "dry_run"
     ]
 
     define_new_opts()
