@@ -103,7 +103,10 @@ def get_all_node_sites(options, site_attribute):
                         logger.debug("Node %s site: %s", node_name, site_value)
                     break
     except ET.ParseError as e:
-        logger.warning("Failed to parse CIB XML: %s", e)
+        logger.error("Failed to parse CIB XML: %s", e)
+        logger.debug("XML content (first 500 chars): %s", stdout[:500])
+        if len(stdout) > 500:
+            logger.debug("XML truncated, total length: %d bytes", len(stdout))
         return {}
 
     logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
@@ -153,7 +156,10 @@ def get_all_join_attributes(options, join_attribute):
                         logger.debug("Node %s %s: %s", node_name, join_attribute, join_value)
                     break
     except ET.ParseError as e:
-        logger.warning("Failed to parse join attributes XML: %s", e)
+        logger.error("Failed to parse join attributes XML: %s", e)
+        logger.debug("XML content (first 500 chars): %s", stdout[:500])
+        if len(stdout) > 500:
+            logger.debug("XML truncated, total length: %d bytes", len(stdout))
         _join_attributes_cache = {}
         return {}
 
@@ -254,7 +260,10 @@ def get_all_node_states(options):
         return node_states
 
     except ET.ParseError as e:
-        logger.warning("Failed to parse node_state XML: %s", e)
+        logger.error("Failed to parse node_state XML: %s", e)
+        logger.debug("XML content (first 500 chars): %s", stdout[:500])
+        if len(stdout) > 500:
+            logger.debug("XML truncated, total length: %d bytes", len(stdout))
         _node_states_cache = {}
         return {}
 
