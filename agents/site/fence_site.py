@@ -39,7 +39,6 @@ logger = logging.getLogger()
 # Global caches (populated once per execution)
 # Note: These caches are not thread-safe. Fence agents run single-threaded.
 _node_states_cache: Optional[Dict[str, ET.Element]] = None
-_join_attributes_cache: Optional[Dict[str, str]] = None
 _cluster_nodes_cache: Optional[Dict[str, str]] = None
 
 
@@ -159,73 +158,6 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
 
     logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
     return node_sites
-
-
-def get_all_join_attributes(
-    options: Dict[str, str],
-    join_attribute: str
-) -> Dict[str, str]:
-    """Get join attribute for all nodes (single CIB query - optimized).
-
-    Populates global _join_attributes_cache for access by other functions.
-
-    Args:
-        options: Options dictionary from fence agent
-        join_attribute: Name of the join attribute to query
-
-    Returns:
-        Mapping of node_name to join_value (empty dict on error)
-    """
-    global _join_attributes_cache
-
-    attr_safe = shlex.quote(join_attribute)
-    cmd = (
-        f'cibadmin --query '
-        f'--xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
-    )
-
-    (rc, stdout, stderr) = run_cmd(options, cmd)
-
-    if rc != 0:
-        logger.debug("Failed to query join attributes (rc=%d)", rc)
-        _join_attributes_cache = {}
-        return {}
-
-    # Parse XML output
-    root = safe_parse_xml(stdout, "join attributes XML")
-    if root is None:
-        _join_attributes_cache = {}
-        return {}
-
-    join_attrs = {}
-    # Find all node elements
-    for node in root.findall('.//node'):
-        node_name = node.get('uname')
-        if not node_name:
-            continue
-
-        # Find the join attribute value
-        for nvpair in node.findall('.//nvpair'):
-            if nvpair.get('name') == join_attribute:
-                join_value = nvpair.get('value')
-                if join_value:
-                    join_attrs[node_name] = join_value
-                    logger.debug("Node %s %s: %s", node_name, join_attribute, join_value)
-                break
-
-    logger.debug("Batch query found %d nodes with join attribute", len(join_attrs))
-    _join_attributes_cache = join_attrs
-    return join_attrs
-
-
-def get_cached_join_attributes() -> Dict[str, str]:
-    """Get cached join attributes from global cache.
-
-    Returns:
-        Mapping of node_name to join_value (empty dict if not cached)
-    """
-    global _join_attributes_cache
-    return _join_attributes_cache if _join_attributes_cache is not None else {}
 
 
 def set_status_attribute(
@@ -383,20 +315,17 @@ def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[
 
 def get_node_uptime(
     options: Dict[str, str],
-    node: str,
-    join_attribute: str
+    node: str
 ) -> Optional[int]:
-    """Get node uptime in seconds.
+    """Get node uptime in seconds from in_ccm timestamp.
 
     Args:
         options: Options dictionary from fence agent
         node: Node name to check
-        join_attribute: Fallback join attribute name
 
     Returns:
         Uptime in seconds, or None if unavailable
     """
-    # Try in_ccm from node_state first
     node_states = get_cached_node_states()
     if node in node_states:
         node_state = node_states[node]
@@ -409,24 +338,6 @@ def get_node_uptime(
                 return uptime
             except ValueError:
                 logger.warning("Invalid in_ccm timestamp for node %s: %s", node, in_ccm)
-
-    # Fall back to join_attribute if in_ccm not available
-    # Use cached join attributes (lazy load on first access)
-    join_attrs = get_cached_join_attributes()
-    if not join_attrs:
-        # First access - populate cache
-        join_attrs = get_all_join_attributes(options, join_attribute)
-
-    value = join_attrs.get(node)
-    if value:
-        try:
-            join_time = int(value)
-            current_time = int(time.time())
-            uptime = current_time - join_time
-            logger.debug("Node %s uptime from %s: %ds", node, join_attribute, uptime)
-            return uptime
-        except ValueError:
-            logger.warning("Invalid join timestamp for node %s: %s", node, value)
 
     logger.debug("Node %s uptime unavailable", node)
     return None
@@ -582,8 +493,6 @@ def site_fence_test(_conn, options):
         logger.error("Invalid uptime-threshold value: %s, using default 900", e)
         uptime_threshold = 900
 
-    join_attribute = options.get("--join-attribute")
-
     # Quorum safety: default to True (safe), only disable if explicitly false
     quorum_safe_value = options.get("--quorum-safe", "true").lower()
     quorum_safe = quorum_safe_value not in ["0", "no", "off", "false"]
@@ -606,7 +515,6 @@ def site_fence_test(_conn, options):
             target_node,
             site_attribute,
             uptime_threshold,
-            join_attribute,
             quorum_safe,
             force_reschedule
         )
@@ -704,8 +612,7 @@ def identify_nodes_to_fence(
     target_node: str,
     target_site: str,
     node_sites: Dict[str, str],
-    uptime_threshold: int,
-    join_attribute: str
+    uptime_threshold: int
 ) -> list:
     """Phase 1: Identify peer nodes eligible for fencing.
 
@@ -715,7 +622,6 @@ def identify_nodes_to_fence(
         target_site: Site value of target node
         node_sites: Mapping of node names to site values
         uptime_threshold: Minimum uptime in seconds
-        join_attribute: Name of join time attribute
 
     Returns:
         Node names eligible for fencing (empty if none)
@@ -738,7 +644,7 @@ def identify_nodes_to_fence(
         logger.info("Node %s is on same site as target (%s)", node, target_site)
 
         # Check uptime threshold
-        node_uptime = get_node_uptime(options, node, join_attribute)
+        node_uptime = get_node_uptime(options, node)
         if node_uptime is None:
             logger.info("Node %s: uptime unavailable, skipping for safety", node)
             continue
@@ -889,7 +795,6 @@ def execute_site_fence(
     target_node: str,
     site_attribute: str,
     uptime_threshold: int,
-    join_attribute: str,
     quorum_safe: bool,
     force_reschedule: bool
 ) -> bool:
@@ -905,7 +810,6 @@ def execute_site_fence(
         target_node: Node being fenced
         site_attribute: Name of the site attribute
         uptime_threshold: Minimum uptime in seconds
-        join_attribute: Name of join time attribute
         quorum_safe: Whether to enforce quorum check
         force_reschedule: Whether to fail when peers need fencing
 
@@ -935,7 +839,7 @@ def execute_site_fence(
     logger.info("Target node %s is on site: %s", target_node, target_site)
 
     # Check target node uptime availability
-    target_uptime = get_node_uptime(options, target_node, join_attribute)
+    target_uptime = get_node_uptime(options, target_node)
     if target_uptime is None:
         logger.warning("Uptime unavailable for target node: %s, cannot verify threshold",
                        target_node)
@@ -959,7 +863,7 @@ def execute_site_fence(
     # Phase 1: Identify nodes to fence
     nodes_to_fence = identify_nodes_to_fence(
         options, target_node, target_site, node_sites,
-        uptime_threshold, join_attribute
+        uptime_threshold
     )
 
     # Phase 2: Quorum safety check
@@ -978,8 +882,8 @@ def execute_site_fence(
 def define_new_opts():
     """Define custom fence agent options.
 
-    Adds site_attribute, uptime_threshold, join_attribute, quorum_safe,
-    force_reschedule, and dry_run options to the fence agent.
+    Adds site_attribute, uptime_threshold, quorum_safe, force_reschedule,
+    and dry_run options to the fence agent.
     """
     all_opt["site_attribute"] = {
         "getopt": ":",
@@ -1004,18 +908,6 @@ def define_new_opts():
         "required": "0",
         "default": "900",
         "order": 2
-    }
-    all_opt["join_attribute"] = {
-        "getopt": ":",
-        "longopt": "join-attribute",
-        "help": (
-            "--join-attribute=[name]        "
-            "Attribute storing node join timestamp"
-        ),
-        "shortdesc": "Join attribute name",
-        "required": "0",
-        "default": "node_join_time",
-        "order": 3
     }
     all_opt["quorum_safe"] = {
         "getopt": ":",
@@ -1068,7 +960,6 @@ def main():
         "no_status",
         "site_attribute",
         "uptime_threshold",
-        "join_attribute",
         "quorum_safe",
         "force_reschedule",
         "dry_run"
@@ -1112,9 +1003,7 @@ terminate attributes are set while the real fence operation executes:
 
   pcs stonith level add 1 NODE fence-site REAL-FENCE-DEVICE
 
-The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps when available, falling back
-to a custom join_attribute for older versions. Use alert-uptime-helper to maintain join times
-on older Pacemaker installations.
+The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps for uptime tracking.
 
 Actions:
 - OFF/REBOOT: Sets terminate attribute for OTHER nodes on same site (NOT the target node)
