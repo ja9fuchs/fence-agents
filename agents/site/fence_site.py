@@ -5,12 +5,14 @@
 # When a node is fenced, this agent identifies and fences all other nodes
 # with the same site attribute, enabling parallel site-wide fencing.
 
+import atexit
+import logging
 import shlex
 import sys
-import logging
-import atexit
 import time
 import xml.etree.ElementTree as ET
+from typing import Dict, Optional, Set, Tuple
+
 sys.path.append("/usr/share/fence")
 from fencing import (
     EC_STATUS,
@@ -30,15 +32,16 @@ from fencing import (
 logger = logging.getLogger()
 
 # Global cache for node_states (populated once per execution)
-_node_states_cache = None
+# Note: These caches are not thread-safe. Fence agents run single-threaded.
+_node_states_cache: Optional[Dict[str, ET.Element]] = None
 
 # Global cache for join attributes (populated on first access)
-_join_attributes_cache = None
+_join_attributes_cache: Optional[Dict[str, str]] = None
 
 # Global cache for cluster nodes (populated on first access)
-_cluster_nodes_cache = None
+_cluster_nodes_cache: Optional[Dict[str, str]] = None
 
-def run_cmd(options, cmd):
+def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
     """Wrapper around run_command that logs output at debug level"""
     rc, stdout, stderr = run_command(options, cmd)
     if stdout:
@@ -48,7 +51,7 @@ def run_cmd(options, cmd):
     logger.debug("rc: %d", rc)
     return rc, stdout, stderr
 
-def is_dry_run(options):
+def is_dry_run(options: Dict[str, str]) -> bool:
     """Check if dry-run mode is enabled.
 
     Args:
@@ -59,7 +62,7 @@ def is_dry_run(options):
     """
     return options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
 
-def get_all_online_nodes(options):
+def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
     """Get list of all online nodes from cached cluster nodes
 
     Returns:
@@ -73,7 +76,7 @@ def get_all_online_nodes(options):
     logger.debug("Online nodes: %s", ', '.join(sorted(online_nodes)))
     return online_nodes
 
-def get_all_node_sites(options, site_attribute):
+def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str, str]:
     """Get site attribute for all nodes (single CIB query - optimized)
 
     Args:
@@ -121,7 +124,7 @@ def get_all_node_sites(options, site_attribute):
     logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
     return node_sites
 
-def get_all_join_attributes(options, join_attribute):
+def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dict[str, str]:
     """Get join attribute for all nodes (single CIB query - optimized)
 
     Populates global _join_attributes_cache for access by other functions
@@ -176,7 +179,7 @@ def get_all_join_attributes(options, join_attribute):
     _join_attributes_cache = join_attrs
     return join_attrs
 
-def get_cached_join_attributes():
+def get_cached_join_attributes() -> Dict[str, str]:
     """Get cached join attributes from global cache
 
     Returns:
@@ -185,7 +188,7 @@ def get_cached_join_attributes():
     global _join_attributes_cache
     return _join_attributes_cache if _join_attributes_cache is not None else {}
 
-def set_status_attribute(options, node, attribute, value):
+def set_status_attribute(options: Dict[str, str], node: str, attribute: str, value: str) -> bool:
     """Set status attribute for a node
 
     Returns:
@@ -211,7 +214,7 @@ def set_status_attribute(options, node, attribute, value):
         logger.error("Error: %s", stderr.strip())
     return False
 
-def delete_status_attribute(options, node, attribute):
+def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) -> bool:
     """Delete status attribute for a node
 
     Returns:
@@ -236,7 +239,7 @@ def delete_status_attribute(options, node, attribute):
         logger.error("Error: %s", stderr.strip())
     return False
 
-def get_all_node_states(options):
+def get_all_node_states(options: Dict[str, str]) -> Dict[str, ET.Element]:
     """Query all node_state elements from CIB (single query - optimized)
 
     Populates global _node_states_cache for access by other functions
@@ -284,7 +287,7 @@ def get_all_node_states(options):
         _node_states_cache = {}
         return {}
 
-def get_cached_node_states():
+def get_cached_node_states() -> Dict[str, ET.Element]:
     """Get cached node_states from global cache
 
     Returns:
@@ -293,7 +296,7 @@ def get_cached_node_states():
     global _node_states_cache
     return _node_states_cache if _node_states_cache is not None else {}
 
-def get_terminate_from_node_state(node_state):
+def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[str]:
     """Extract terminate status attribute from node_state Element
 
     Args:
@@ -312,7 +315,7 @@ def get_terminate_from_node_state(node_state):
 
     return None
 
-def get_node_uptime(options, node, join_attribute):
+def get_node_uptime(options: Dict[str, str], node: str, join_attribute: str) -> Optional[int]:
     """Get node uptime in seconds
 
     Args:
@@ -358,7 +361,7 @@ def get_node_uptime(options, node, join_attribute):
     logger.debug("Node %s uptime unavailable", node)
     return None
 
-def get_all_cluster_nodes(options):
+def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
     """Get dict of all cluster nodes with status (cached)
 
     Returns:
@@ -391,7 +394,7 @@ def get_all_cluster_nodes(options):
     _cluster_nodes_cache = nodes
     return nodes
 
-def get_quorum_status(options):
+def get_quorum_status(options: Dict[str, str]) -> Tuple[Optional[int], Optional[bool]]:
     """Get quorum status
 
     Returns:
@@ -418,7 +421,7 @@ def get_quorum_status(options):
     logger.debug("Quorum: expected_votes=%d quorate=%s", expected_votes, quorate)
     return expected_votes, quorate
 
-def check_quorum_safety(options, nodes_to_fence_count):
+def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> bool:
     """Check if fencing would cause loss of quorum
 
     Returns:
@@ -505,7 +508,7 @@ def site_fence_test(conn, options):
     logger.warning("Action %s not handled", action)
     return False
 
-def get_site_status(options, target_node, site_attribute):
+def get_site_status(options: Dict[str, str], target_node: str, site_attribute: str) -> bool:
     """Check if site is fenced (for status action)
 
     Returns:
@@ -579,8 +582,14 @@ def get_site_status(options, target_node, site_attribute):
     logger.debug("Not all online peer nodes terminated, returning on")
     return True  # on = not fenced
 
-def identify_nodes_to_fence(options, target_node, target_site, node_sites,
-                            uptime_threshold, join_attribute):
+def identify_nodes_to_fence(
+    options: Dict[str, str],
+    target_node: str,
+    target_site: str,
+    node_sites: Dict[str, str],
+    uptime_threshold: int,
+    join_attribute: str
+) -> list:
     """Phase 1: Identify peer nodes eligible for fencing
 
     Args:
@@ -630,7 +639,12 @@ def identify_nodes_to_fence(options, target_node, target_site, node_sites,
     logger.info("Phase 1 complete: %d peer nodes eligible for fencing", len(nodes_to_fence))
     return nodes_to_fence
 
-def validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
+def validate_quorum_safety(
+    options: Dict[str, str],
+    target_node: str,
+    nodes_to_fence: list,
+    quorum_safe: bool
+) -> bool:
     """Phase 2: Validate quorum safety before fencing
 
     Args:
@@ -664,7 +678,12 @@ def validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
     logger.info("Phase 2 complete: Quorum safety check PASSED")
     return True
 
-def set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule):
+def set_terminate_attributes(
+    options: Dict[str, str],
+    target_node: str,
+    nodes_to_fence: list,
+    force_reschedule: bool
+) -> bool:
     """Phase 3: Set terminate attributes and determine return value
 
     Args:
@@ -739,7 +758,15 @@ def set_terminate_attributes(options, target_node, nodes_to_fence, force_resched
     logger.info("Phase 3 complete: Returning SUCCESS")
     return failed_count == 0
 
-def execute_site_fence(options, target_node, site_attribute, uptime_threshold, join_attribute, quorum_safe, force_reschedule):
+def execute_site_fence(
+    options: Dict[str, str],
+    target_node: str,
+    site_attribute: str,
+    uptime_threshold: int,
+    join_attribute: str,
+    quorum_safe: bool,
+    force_reschedule: bool
+) -> bool:
     """Execute site-wide fencing
 
     Orchestrates 3 phases:
