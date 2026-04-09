@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Optional, Set, Tuple
 
 sys.path.append("/usr/share/fence")
-from fencing import (
+from fencing import (  # noqa: E402
     EC_STATUS,
     SyslogLibHandler,
     all_opt,
@@ -33,7 +33,7 @@ XML_PREVIEW_LENGTH = 500  # Characters to show in debug logs for XML parsing err
 DEFAULT_POWER_TIMEOUT = "60"  # Seconds for fence operation timeout
 DEFAULT_SHELL_TIMEOUT = "30"  # Seconds for shell command timeout
 
-# Get logger instance (will be configured in main() after fencing library initializes)
+# Get logger instance (configured in main() after fencing library initializes)
 logger = logging.getLogger()
 
 # Global caches (populated once per execution)
@@ -44,7 +44,7 @@ _cluster_nodes_cache: Optional[Dict[str, str]] = None
 
 
 def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
-    """Wrapper around run_command for output at debug level.
+    """Wrapper around run_command() for output at debug level.
 
     Args:
         options: Options dictionary from fence agent
@@ -55,9 +55,9 @@ def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
     """
     (rc, stdout, stderr) = run_command(options, cmd)
     if stdout:
-        logger.debug("stdout: %s", stdout.strip())
+        logger.debug("stdout:\n%s", stdout.strip())
     if stderr:
-        logger.debug("stderr: %s", stderr.strip())
+        logger.debug("stderr:\n%s", stderr.strip())
     logger.debug("rc: %d", rc)
     return (rc, stdout, stderr)
 
@@ -88,7 +88,7 @@ def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element
         return ET.fromstring(xml_string)
     except ET.ParseError as e:
         logger.error("Failed to parse %s: %s", context, e)
-        logger.debug("%s content (first %d chars): %s",
+        logger.debug("%s content (first %d chars):\n%s",
                      context, XML_PREVIEW_LENGTH, xml_string[:XML_PREVIEW_LENGTH])
         if len(xml_string) > XML_PREVIEW_LENGTH:
             logger.debug("%s truncated, total length: %d bytes",
@@ -161,7 +161,10 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
     return node_sites
 
 
-def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dict[str, str]:
+def get_all_join_attributes(
+    options: Dict[str, str],
+    join_attribute: str
+) -> Dict[str, str]:
     """Get join attribute for all nodes (single CIB query - optimized).
 
     Populates global _join_attributes_cache for access by other functions.
@@ -225,7 +228,12 @@ def get_cached_join_attributes() -> Dict[str, str]:
     return _join_attributes_cache if _join_attributes_cache is not None else {}
 
 
-def set_status_attribute(options: Dict[str, str], node: str, attribute: str, value: str) -> bool:
+def set_status_attribute(
+    options: Dict[str, str],
+    node: str,
+    attribute: str,
+    value: str
+) -> bool:
     """Set status attribute for a node.
 
     Args:
@@ -364,7 +372,8 @@ def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[
     if node_state is None:
         return None
 
-    # Navigate: node_state -> transient_attributes -> instance_attributes -> nvpair[@name='terminate']
+    # Navigate: node_state -> transient_attributes -> instance_attributes
+    #           -> nvpair[@name='terminate']
     for nvpair in node_state.findall('.//transient_attributes/instance_attributes/nvpair'):
         if nvpair.get('name') == 'terminate':
             return nvpair.get('value')
@@ -372,7 +381,11 @@ def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[
     return None
 
 
-def get_node_uptime(options: Dict[str, str], node: str, join_attribute: str) -> Optional[int]:
+def get_node_uptime(
+    options: Dict[str, str],
+    node: str,
+    join_attribute: str
+) -> Optional[int]:
     """Get node uptime in seconds.
 
     Args:
@@ -602,7 +615,11 @@ def site_fence_test(_conn, options):
     return False
 
 
-def get_site_status(options: Dict[str, str], target_node: str, site_attribute: str) -> bool:
+def get_site_status(
+    options: Dict[str, str],
+    target_node: str,
+    site_attribute: str
+) -> bool:
     """Check if site is fenced (for status action).
 
     Args:
@@ -837,8 +854,10 @@ def set_terminate_attributes(
                 failed_count += 1
                 failed_nodes.append(node)
 
-    logger.info("Terminate attributes: %d already set, %d newly set, %d failures",
-                already_set, newly_set, failed_count)
+    logger.info(
+        "Terminate attributes: %d already set, %d newly set, %d failures",
+        already_set, newly_set, failed_count
+    )
     logger.info("Peer nodes with terminate newly set: %d", peer_terminate_new)
 
     if failed_nodes:
@@ -846,16 +865,20 @@ def set_terminate_attributes(
 
     # Determine return value based on mode
     if force_reschedule and peer_terminate_new > 0:
-        logger.info("Site-wide fencing active - fence_site fails for target node %s", target_node)
-        logger.info("Fencing of %s must be rescheduled after peer nodes are fenced", target_node)
+        logger.info("Site-wide fencing active - fence_site fails for target node %s",
+                    target_node)
+        logger.info("Fencing of %s must be rescheduled after peer nodes are fenced",
+                    target_node)
         logger.info("Phase 3 complete: Returning FAILURE to trigger scheduler")
         return False
 
     # Default behavior: return success if terminate attributes set successfully
     if peer_terminate_new > 0:
-        logger.info("Peer nodes have terminate set - target %s will be fenced by next device", target_node)
+        logger.info("Peer nodes set terminate - target %s will be fenced by next device",
+                    target_node)
     else:
-        logger.info("No peer nodes on site - target %s will be fenced by next device", target_node)
+        logger.info("No peer nodes on site - target %s will be fenced by next device",
+                    target_node)
 
     logger.info("Phase 3 complete: Returning SUCCESS")
     return failed_count == 0
@@ -893,16 +916,17 @@ def execute_site_fence(
     logger.info("Site attribute: %s, uptime threshold: %ds, force parallel: %s",
                 site_attribute, uptime_threshold, force_reschedule)
 
-    # Query all node states once (optimization: single CIB query)
+    # Query all node states once
     get_all_node_states(options)
 
-    # Get all node sites in one query (optimization: single CIB query)
+    # Get all node sites in one query
     node_sites = get_all_node_sites(options, site_attribute)
 
     # Get target node's site from batch query result
     target_site = node_sites.get(target_node)
     if not target_site:
-        logger.info("No site attribute for target node: %s, proceeding with single target", target_node)
+        logger.info("No site attribute for target node: %s, proceeding with single target",
+                    target_node)
         # Clean up any stale terminate attributes
         delete_status_attribute(options, target_node, "terminate")
         logger.info("Single-node fencing will be handled by next device in topology")
@@ -1021,7 +1045,7 @@ def define_new_opts():
         "getopt": ":",
         "longopt": "dry-run",
         "help": (
-            "--dry-run=[true|false]        "
+            "--dry-run=[true|false]         "
             "Log actions without executing (testing only)"
         ),
         "shortdesc": "Dry-run mode",
@@ -1129,6 +1153,7 @@ Safety features:
     )
 
     sys.exit(result)
+
 
 if __name__ == "__main__":
     main()
