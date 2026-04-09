@@ -28,6 +28,11 @@ from fencing import (
     show_docs,
 )
 
+# Constants
+XML_PREVIEW_LENGTH = 500  # Characters to show in debug logs for XML parsing errors
+DEFAULT_POWER_TIMEOUT = "60"  # Seconds for fence operation timeout
+DEFAULT_SHELL_TIMEOUT = "30"  # Seconds for shell command timeout
+
 # Get logger instance (will be configured in main() after fencing library initializes)
 logger = logging.getLogger()
 
@@ -116,8 +121,8 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
                     break
     except ET.ParseError as e:
         logger.error("Failed to parse CIB XML: %s", e)
-        logger.debug("XML content (first 500 chars): %s", stdout[:500])
-        if len(stdout) > 500:
+        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
+        if len(stdout) > XML_PREVIEW_LENGTH:
             logger.debug("XML truncated, total length: %d bytes", len(stdout))
         return {}
 
@@ -169,8 +174,8 @@ def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dic
                     break
     except ET.ParseError as e:
         logger.error("Failed to parse join attributes XML: %s", e)
-        logger.debug("XML content (first 500 chars): %s", stdout[:500])
-        if len(stdout) > 500:
+        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
+        if len(stdout) > XML_PREVIEW_LENGTH:
             logger.debug("XML truncated, total length: %d bytes", len(stdout))
         _join_attributes_cache = {}
         return {}
@@ -281,8 +286,8 @@ def get_all_node_states(options: Dict[str, str]) -> Dict[str, ET.Element]:
 
     except ET.ParseError as e:
         logger.error("Failed to parse node_state XML: %s", e)
-        logger.debug("XML content (first 500 chars): %s", stdout[:500])
-        if len(stdout) > 500:
+        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
+        if len(stdout) > XML_PREVIEW_LENGTH:
             logger.debug("XML truncated, total length: %d bytes", len(stdout))
         _node_states_cache = {}
         return {}
@@ -910,8 +915,8 @@ def main():
     define_new_opts()
     atexit.register(atexit_handler)
 
-    all_opt["power_timeout"]["default"] = "60"
-    all_opt["shell_timeout"]["default"] = "30"
+    all_opt["power_timeout"]["default"] = DEFAULT_POWER_TIMEOUT
+    all_opt["shell_timeout"]["default"] = DEFAULT_SHELL_TIMEOUT
 
     options = check_input(device_opt, process_input(device_opt))
 
