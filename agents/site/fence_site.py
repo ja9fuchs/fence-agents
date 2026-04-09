@@ -477,8 +477,8 @@ def get_quorum_status(options: Dict[str, str]) -> Tuple[int, bool]:
             if parts:
                 try:
                     expected_votes = int(parts[-1])
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    logger.debug("Failed to parse expected_votes from '%s': %s", parts[-1], e)
         elif "Quorate" in line:
             parts = line.split()
             if parts and parts[-1].lower() in ["yes", "1"]:
@@ -561,7 +561,14 @@ def site_fence_test(_conn, options):
             return False
 
     site_attribute = options.get("--site-attribute")
-    uptime_threshold = int(options.get("--uptime-threshold"))
+
+    # Parse uptime threshold with error handling
+    try:
+        uptime_threshold = int(options.get("--uptime-threshold"))
+    except (ValueError, TypeError) as e:
+        logger.error("Invalid uptime-threshold value: %s, using default 900", e)
+        uptime_threshold = 900
+
     join_attribute = options.get("--join-attribute")
     quorum_safe = options.get("--quorum-safe").lower() in ["1", "yes", "on", "true"]
     force_reschedule = options.get("--force-reschedule").lower() in ["1", "yes", "on", "true"]
