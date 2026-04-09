@@ -67,6 +67,27 @@ def is_dry_run(options: Dict[str, str]) -> bool:
     """
     return options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
 
+def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element]:
+    """Safely parse XML with comprehensive error logging.
+
+    Args:
+        xml_string: XML content to parse
+        context: Description for error messages (e.g., "CIB XML", "node states XML")
+
+    Returns:
+        Optional[ET.Element]: Parsed root element, or None on parse error
+    """
+    try:
+        return ET.fromstring(xml_string)
+    except ET.ParseError as e:
+        logger.error("Failed to parse %s: %s", context, e)
+        logger.debug("%s content (first %d chars): %s",
+                    context, XML_PREVIEW_LENGTH, xml_string[:XML_PREVIEW_LENGTH])
+        if len(xml_string) > XML_PREVIEW_LENGTH:
+            logger.debug("%s truncated, total length: %d bytes",
+                        context, len(xml_string))
+        return None
+
 def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
     """Get list of all online nodes from cached cluster nodes
 
@@ -100,31 +121,26 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
         logger.warning("Failed to query nodes site (rc=%d)", rc)
         return {}
 
-    node_sites = {}
-    try:
-        # Parse XML output
-        root = ET.fromstring(stdout)
-
-        # Find all node elements
-        for node in root.findall('.//node'):
-            node_name = node.get('uname')
-            if not node_name:
-                continue
-
-            # Find the site attribute value
-            for nvpair in node.findall('.//nvpair'):
-                if nvpair.get('name') == site_attribute:
-                    site_value = nvpair.get('value')
-                    if site_value:
-                        node_sites[node_name] = site_value
-                        logger.debug("Node %s site: %s", node_name, site_value)
-                    break
-    except ET.ParseError as e:
-        logger.error("Failed to parse CIB XML: %s", e)
-        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
-        if len(stdout) > XML_PREVIEW_LENGTH:
-            logger.debug("XML truncated, total length: %d bytes", len(stdout))
+    # Parse XML output
+    root = safe_parse_xml(stdout, "CIB XML")
+    if root is None:
         return {}
+
+    node_sites = {}
+    # Find all node elements
+    for node in root.findall('.//node'):
+        node_name = node.get('uname')
+        if not node_name:
+            continue
+
+        # Find the site attribute value
+        for nvpair in node.findall('.//nvpair'):
+            if nvpair.get('name') == site_attribute:
+                site_value = nvpair.get('value')
+                if site_value:
+                    node_sites[node_name] = site_value
+                    logger.debug("Node %s site: %s", node_name, site_value)
+                break
 
     logger.debug("Batch query found %d nodes with site attribute", len(node_sites))
     return node_sites
@@ -153,32 +169,27 @@ def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dic
         _join_attributes_cache = {}
         return {}
 
-    join_attrs = {}
-    try:
-        # Parse XML output
-        root = ET.fromstring(stdout)
-
-        # Find all node elements
-        for node in root.findall('.//node'):
-            node_name = node.get('uname')
-            if not node_name:
-                continue
-
-            # Find the join attribute value
-            for nvpair in node.findall('.//nvpair'):
-                if nvpair.get('name') == join_attribute:
-                    join_value = nvpair.get('value')
-                    if join_value:
-                        join_attrs[node_name] = join_value
-                        logger.debug("Node %s %s: %s", node_name, join_attribute, join_value)
-                    break
-    except ET.ParseError as e:
-        logger.error("Failed to parse join attributes XML: %s", e)
-        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
-        if len(stdout) > XML_PREVIEW_LENGTH:
-            logger.debug("XML truncated, total length: %d bytes", len(stdout))
+    # Parse XML output
+    root = safe_parse_xml(stdout, "join attributes XML")
+    if root is None:
         _join_attributes_cache = {}
         return {}
+
+    join_attrs = {}
+    # Find all node elements
+    for node in root.findall('.//node'):
+        node_name = node.get('uname')
+        if not node_name:
+            continue
+
+        # Find the join attribute value
+        for nvpair in node.findall('.//nvpair'):
+            if nvpair.get('name') == join_attribute:
+                join_value = nvpair.get('value')
+                if join_value:
+                    join_attrs[node_name] = join_value
+                    logger.debug("Node %s %s: %s", node_name, join_attribute, join_value)
+                break
 
     logger.debug("Batch query found %d nodes with join attribute", len(join_attrs))
     _join_attributes_cache = join_attrs
@@ -263,34 +274,29 @@ def get_all_node_states(options: Dict[str, str]) -> Dict[str, ET.Element]:
         _node_states_cache = {}
         return {}
 
-    node_states = {}
-    try:
-        root = ET.fromstring(stdout)
-
-        # Handle both single node_state and multiple wrapped in a parent
-        if root.tag == 'node_state':
-            # Single node_state element
-            node_name = root.get('uname')
-            if node_name:
-                node_states[node_name] = root
-        else:
-            # Multiple node_state elements
-            for node_state in root.findall('.//node_state'):
-                node_name = node_state.get('uname')
-                if node_name:
-                    node_states[node_name] = node_state
-
-        logger.debug("Queried %d node_state elements", len(node_states))
-        _node_states_cache = node_states
-        return node_states
-
-    except ET.ParseError as e:
-        logger.error("Failed to parse node_state XML: %s", e)
-        logger.debug("XML content (first %d chars): %s", XML_PREVIEW_LENGTH, stdout[:XML_PREVIEW_LENGTH])
-        if len(stdout) > XML_PREVIEW_LENGTH:
-            logger.debug("XML truncated, total length: %d bytes", len(stdout))
+    # Parse XML output
+    root = safe_parse_xml(stdout, "node_state XML")
+    if root is None:
         _node_states_cache = {}
         return {}
+
+    node_states = {}
+    # Handle both single node_state and multiple wrapped in a parent
+    if root.tag == 'node_state':
+        # Single node_state element
+        node_name = root.get('uname')
+        if node_name:
+            node_states[node_name] = root
+    else:
+        # Multiple node_state elements
+        for node_state in root.findall('.//node_state'):
+            node_name = node_state.get('uname')
+            if node_name:
+                node_states[node_name] = node_state
+
+    logger.debug("Queried %d node_state elements", len(node_states))
+    _node_states_cache = node_states
+    return node_states
 
 def get_cached_node_states() -> Dict[str, ET.Element]:
     """Get cached node_states from global cache
