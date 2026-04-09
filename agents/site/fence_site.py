@@ -89,10 +89,10 @@ def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element
     except ET.ParseError as e:
         logger.error("Failed to parse %s: %s", context, e)
         logger.debug("%s content (first %d chars): %s",
-                    context, XML_PREVIEW_LENGTH, xml_string[:XML_PREVIEW_LENGTH])
+                     context, XML_PREVIEW_LENGTH, xml_string[:XML_PREVIEW_LENGTH])
         if len(xml_string) > XML_PREVIEW_LENGTH:
             logger.debug("%s truncated, total length: %d bytes",
-                        context, len(xml_string))
+                         context, len(xml_string))
         return None
 
 
@@ -125,7 +125,10 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
         Mapping of node_name to site_value (empty dict on error)
     """
     attr_safe = shlex.quote(site_attribute)
-    cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name=\'{attr_safe}\']]]"'
+    cmd = (
+        f'cibadmin --query '
+        f'--xpath "//nodes/node[instance_attributes[nvpair[@name=\'{attr_safe}\']]]"'
+    )
 
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
@@ -173,7 +176,10 @@ def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dic
     global _join_attributes_cache
 
     attr_safe = shlex.quote(join_attribute)
-    cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
+    cmd = (
+        f'cibadmin --query '
+        f'--xpath "//nodes/node[instance_attributes[nvpair[@name={attr_safe}]]]"'
+    )
 
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
@@ -234,7 +240,10 @@ def set_status_attribute(options: Dict[str, str], node: str, attribute: str, val
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
     value_safe = shlex.quote(value)
-    cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --update {value_safe} --type "status"'
+    cmd = (
+        f'crm_attribute --node {node_safe} --name {attr_safe} '
+        f'--update {value_safe} --type "status"'
+    )
 
     if is_dry_run(options):
         logger.info("DRY-RUN: Would execute: %s", cmd)
@@ -265,7 +274,10 @@ def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) 
     """
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
-    cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --delete --type "status"'
+    cmd = (
+        f'crm_attribute --node {node_safe} --name {attr_safe} '
+        f'--delete --type "status"'
+    )
 
     if is_dry_run(options):
         logger.info("DRY-RUN: Would execute: %s", cmd)
@@ -439,6 +451,7 @@ def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
             # Fallback if no status
             nodes[parts[1]] = "unknown"
 
+    # DEBUG example: node1(member), node2(member), node3(lost)
     logger.debug("Cluster nodes: %s", ", ".join(f"{n}({s})" for n, s in nodes.items()))
     _cluster_nodes_cache = nodes
     return nodes
@@ -499,7 +512,10 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
 
     if remaining_nodes < quorum_threshold:
         logger.error("SAFETY: Fencing would cause loss of quorum!")
-        logger.error("SAFETY: Remaining nodes (%d) < threshold (%d)", remaining_nodes, quorum_threshold)
+        logger.error(
+            "SAFETY: Remaining nodes (%d) < threshold (%d)",
+            remaining_nodes, quorum_threshold
+        )
         return False
 
     logger.info("Quorum check: SAFE - remaining nodes >= threshold")
