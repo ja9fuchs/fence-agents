@@ -570,7 +570,11 @@ def site_fence_test(_conn, options):
         uptime_threshold = 900
 
     join_attribute = options.get("--join-attribute")
-    quorum_safe = options.get("--quorum-safe").lower() in ["1", "yes", "on", "true"]
+
+    # Quorum safety: default to True (safe), only disable if explicitly false
+    quorum_safe_value = options.get("--quorum-safe", "true").lower()
+    quorum_safe = quorum_safe_value not in ["0", "no", "off", "false"]
+
     force_reschedule = options.get("--force-reschedule").lower() in ["1", "yes", "on", "true"]
 
     # Validate uptime threshold
