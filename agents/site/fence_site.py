@@ -450,20 +450,13 @@ def site_fence_test(_conn, options):
     """
     action = options["--action"]
 
-    # Get parameters
+    # Get target node
     target_node = options.get("--plug")
     if not target_node:
         logger.error("No target node specified")
         return False
 
-    # Verify target node is a cluster member
-    cluster_nodes = get_all_cluster_nodes(options)
-    if cluster_nodes and target_node not in cluster_nodes:
-        logger.error("Target node '%s' is not a cluster member", target_node)
-        logger.error("Known cluster nodes: %s", ", ".join(cluster_nodes.keys()))
-        fail(EC_STATUS)
-
-    # Handle "on" action - clear terminate attribute
+    # Handle "on" action - just clear terminate attribute (no validation needed)
     if action == "on":
         logger.info("Unfencing node %s - clearing terminate attribute", target_node)
         if clear_terminate(options, target_node):
@@ -472,6 +465,13 @@ def site_fence_test(_conn, options):
         else:
             logger.error("Failed to clear terminate attribute for node %s", target_node)
             return False
+
+    # Verify target node is a cluster member (for off/reboot/status actions)
+    cluster_nodes = get_all_cluster_nodes(options)
+    if cluster_nodes and target_node not in cluster_nodes:
+        logger.error("Target node '%s' is not a cluster member", target_node)
+        logger.error("Known cluster nodes: %s", ", ".join(cluster_nodes.keys()))
+        fail(EC_STATUS)
 
     site_attribute = options.get("--site-attribute")
 
