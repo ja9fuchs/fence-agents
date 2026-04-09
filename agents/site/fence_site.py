@@ -44,7 +44,7 @@ _cluster_nodes_cache: Optional[Dict[str, str]] = None
 
 
 def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
-    """Wrapper around run_command that logs output at debug level.
+    """Wrapper around run_command for output at debug level.
 
     Args:
         options: Options dictionary from fence agent
@@ -53,13 +53,13 @@ def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
     Returns:
         Return code, stdout, stderr
     """
-    rc, stdout, stderr = run_command(options, cmd)
+    (rc, stdout, stderr) = run_command(options, cmd)
     if stdout:
         logger.debug("stdout: %s", stdout.strip())
     if stderr:
         logger.debug("stderr: %s", stderr.strip())
     logger.debug("rc: %d", rc)
-    return rc, stdout, stderr
+    return (rc, stdout, stderr)
 
 
 def is_dry_run(options: Dict[str, str]) -> bool:
@@ -508,7 +508,7 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
     quorum_threshold = (expected_votes // 2) + 1
 
     logger.info("Quorum check: fencing %d nodes, %d would remain (threshold: %d)",
-        nodes_to_fence_count, remaining_nodes, quorum_threshold)
+                nodes_to_fence_count, remaining_nodes, quorum_threshold)
 
     if remaining_nodes < quorum_threshold:
         logger.error("SAFETY: Fencing would cause loss of quorum!")
@@ -642,7 +642,7 @@ def get_site_status(options: Dict[str, str], target_node: str, site_attribute: s
     # Check status of peer nodes on site (exclude target - it's fenced by real device)
     peer_nodes = [n for n in site_nodes if n != target_node]
     logger.debug("Checking status for %d peer nodes on site %s (excluding target %s)",
-        len(peer_nodes), target_site, target_node)
+                 len(peer_nodes), target_site, target_node)
 
     # Get all online nodes once (optimization: single crm_mon call)
     online_nodes = get_all_online_nodes(options)
@@ -666,7 +666,7 @@ def get_site_status(options: Dict[str, str], target_node: str, site_attribute: s
             logger.debug("Node %s is OFFLINE, skipping terminate check", node)
 
     logger.debug("Site %s status (peer nodes only): %d/%d online terminated, %d offline",
-        target_site, online_nodes_terminated, online_nodes_total, offline_nodes)
+                 target_site, online_nodes_terminated, online_nodes_total, offline_nodes)
 
     # Return False (off/fenced) if all online peer nodes are terminated
     if online_nodes_total > 0 and online_nodes_terminated == online_nodes_total:
@@ -728,11 +728,11 @@ def identify_nodes_to_fence(
 
         if node_uptime < uptime_threshold:
             logger.info("Node %s: uptime %ds < threshold %ds, skipping",
-                node, node_uptime, uptime_threshold)
+                        node, node_uptime, uptime_threshold)
             continue
 
         logger.info("Node %s: uptime %ds >= threshold %ds, eligible for fencing",
-            node, node_uptime, uptime_threshold)
+                    node, node_uptime, uptime_threshold)
 
         nodes_to_fence.append(node)
 
@@ -760,7 +760,7 @@ def validate_quorum_safety(
     # Include target node in count (it will be fenced by real device, not by terminate attribute)
     total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
     logger.info("Phase 2: Quorum safety check for %d nodes (target + %d peers)",
-        total_nodes_to_fence, len(nodes_to_fence))
+                total_nodes_to_fence, len(nodes_to_fence))
 
     if len(nodes_to_fence) == 0:
         logger.info("No other nodes on site require terminate attribute")
@@ -838,7 +838,7 @@ def set_terminate_attributes(
                 failed_nodes.append(node)
 
     logger.info("Terminate attributes: %d already set, %d newly set, %d failures",
-        already_set, newly_set, failed_count)
+                already_set, newly_set, failed_count)
     logger.info("Peer nodes with terminate newly set: %d", peer_terminate_new)
 
     if failed_nodes:
@@ -891,7 +891,7 @@ def execute_site_fence(
     """
     logger.info("Starting site-wide fencing for target: %s", target_node)
     logger.info("Site attribute: %s, uptime threshold: %ds, force parallel: %s",
-        site_attribute, uptime_threshold, force_reschedule)
+                site_attribute, uptime_threshold, force_reschedule)
 
     # Query all node states once (optimization: single CIB query)
     get_all_node_states(options)
@@ -913,11 +913,12 @@ def execute_site_fence(
     # Check target node uptime availability
     target_uptime = get_node_uptime(options, target_node, join_attribute)
     if target_uptime is None:
-        logger.warning("Uptime unavailable for target node: %s, cannot verify threshold", target_node)
+        logger.warning("Uptime unavailable for target node: %s, cannot verify threshold",
+                       target_node)
         logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
     elif target_uptime < uptime_threshold:
         logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
-            target_node, target_uptime, uptime_threshold)
+                    target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
 
         # Clean up any stale terminate attributes for the target node
@@ -959,7 +960,10 @@ def define_new_opts():
     all_opt["site_attribute"] = {
         "getopt": ":",
         "longopt": "site-attribute",
-        "help": "--site-attribute=[name]        Name of cluster attribute defining site membership",
+        "help": (
+            "--site-attribute=[name]        "
+            "Name of cluster attribute defining site membership"
+        ),
         "shortdesc": "Site attribute name",
         "required": "0",
         "default": "site",
@@ -968,7 +972,10 @@ def define_new_opts():
     all_opt["uptime_threshold"] = {
         "getopt": ":",
         "longopt": "uptime-threshold",
-        "help": "--uptime-threshold=[seconds]   Minimum uptime before node can be fenced",
+        "help": (
+            "--uptime-threshold=[seconds]   "
+            "Minimum uptime before node can be fenced"
+        ),
         "shortdesc": "Minimum uptime in seconds",
         "required": "0",
         "default": "900",
@@ -977,7 +984,10 @@ def define_new_opts():
     all_opt["join_attribute"] = {
         "getopt": ":",
         "longopt": "join-attribute",
-        "help": "--join-attribute=[name]        Attribute storing node join timestamp",
+        "help": (
+            "--join-attribute=[name]        "
+            "Attribute storing node join timestamp"
+        ),
         "shortdesc": "Join attribute name",
         "required": "0",
         "default": "node_join_time",
@@ -986,7 +996,10 @@ def define_new_opts():
     all_opt["quorum_safe"] = {
         "getopt": ":",
         "longopt": "quorum-safe",
-        "help": "--quorum-safe=[true|false]     Abort fencing if it would cause loss of quorum",
+        "help": (
+            "--quorum-safe=[true|false]     "
+            "Abort fencing if it would cause loss of quorum"
+        ),
         "shortdesc": "Quorum safety check",
         "required": "0",
         "default": "true",
@@ -995,7 +1008,10 @@ def define_new_opts():
     all_opt["force_reschedule"] = {
         "getopt": ":",
         "longopt": "force-reschedule",
-        "help": "--force-reschedule=[true|false]  Enable parallel fencing mode (fail target when peers need fencing)",
+        "help": (
+            "--force-reschedule=[true|false]  Enable parallel fencing mode "
+            "(fail target when peers need fencing)"
+        ),
         "shortdesc": "Enable parallel fencing",
         "required": "0",
         "default": "false",
@@ -1004,7 +1020,10 @@ def define_new_opts():
     all_opt["dry_run"] = {
         "getopt": ":",
         "longopt": "dry-run",
-        "help": "--dry-run=[true|false]        Log actions without executing (testing only)",
+        "help": (
+            "--dry-run=[true|false]        "
+            "Log actions without executing (testing only)"
+        ),
         "shortdesc": "Dry-run mode",
         "required": "0",
         "default": "false",
