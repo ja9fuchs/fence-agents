@@ -114,7 +114,7 @@ def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
 
 
 def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str, str]:
-    """Get site attribute for all nodes (single CIB query - optimized).
+    """Get site attribute for all nodes.
 
     Args:
         options: Options dictionary from fence agent
@@ -160,29 +160,20 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
     return node_sites
 
 
-def set_status_attribute(
-    options: Dict[str, str],
-    node: str,
-    attribute: str,
-    value: str
-) -> bool:
-    """Set status attribute for a node.
+def set_terminate(options: Dict[str, str], node: str) -> bool:
+    """Set terminate attribute to true for a node.
 
     Args:
         options: Options dictionary from fence agent
-        node: Node name to set attribute on
-        attribute: Attribute name to set
-        value: Value to set for the attribute
+        node: Node name to mark for termination
 
     Returns:
         True on success, False on failure
     """
     node_safe = shlex.quote(node)
-    attr_safe = shlex.quote(attribute)
-    value_safe = shlex.quote(value)
     cmd = (
-        f'crm_attribute --node {node_safe} --name {attr_safe} '
-        f'--update {value_safe} --type "status"'
+        f'crm_attribute --node {node_safe} --name terminate '
+        f'--update true --type "status"'
     )
 
     if is_dry_run(options):
@@ -192,30 +183,28 @@ def set_status_attribute(
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
     if rc == 0:
-        logger.info("Set %s=%s for node %s", attribute, value, node)
+        logger.info("Set terminate=true for node %s", node)
         return True
 
-    logger.error("Failed to set %s for node %s (rc=%d)", attribute, node, rc)
+    logger.error("Failed to set terminate for node %s (rc=%d)", node, rc)
     if stderr:
         logger.error("Error: %s", stderr.strip())
     return False
 
 
-def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) -> bool:
-    """Delete status attribute for a node.
+def clear_terminate(options: Dict[str, str], node: str) -> bool:
+    """Delete terminate attribute for a node (unfencing).
 
     Args:
         options: Options dictionary from fence agent
-        node: Node name to delete attribute from
-        attribute: Attribute name to delete
+        node: Node name to clear termination from
 
     Returns:
         True on success, False on failure
     """
     node_safe = shlex.quote(node)
-    attr_safe = shlex.quote(attribute)
     cmd = (
-        f'crm_attribute --node {node_safe} --name {attr_safe} '
+        f'crm_attribute --node {node_safe} --name terminate '
         f'--delete --type "status"'
     )
 
@@ -226,10 +215,10 @@ def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) 
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
     if rc == 0:
-        logger.info("Cleaned up attribute %s for node %s", attribute, node)
+        logger.info("Cleared terminate attribute for node %s", node)
         return True
 
-    logger.error("Failed to delete %s for node %s (rc=%d)", attribute, node, rc)
+    logger.error("Failed to clear terminate for node %s (rc=%d)", node, rc)
     if stderr:
         logger.error("Error: %s", stderr.strip())
     return False
@@ -477,7 +466,7 @@ def site_fence_test(_conn, options):
     # Handle "on" action - clear terminate attribute
     if action == "on":
         logger.info("Unfencing node %s - clearing terminate attribute", target_node)
-        if delete_status_attribute(options, target_node, "terminate"):
+        if clear_terminate(options, target_node):
             logger.info("Successfully cleared terminate attribute for node %s", target_node)
             return True
         else:
@@ -739,7 +728,7 @@ def set_terminate_attributes(
         already_set += 1
     else:
         logger.info("Setting terminate for target node: %s", target_node)
-        if set_status_attribute(options, target_node, "terminate", "true"):
+        if set_terminate(options, target_node):
             newly_set += 1
         else:
             failed_count += 1
@@ -753,7 +742,7 @@ def set_terminate_attributes(
             already_set += 1
         else:
             logger.info("Setting terminate for peer node: %s", node)
-            if set_status_attribute(options, node, "terminate", "true"):
+            if set_terminate(options, node):
                 newly_set += 1
                 peer_terminate_new += 1
             else:
@@ -832,7 +821,7 @@ def execute_site_fence(
         logger.info("No site attribute for target node: %s, proceeding with single target",
                     target_node)
         # Clean up any stale terminate attributes
-        delete_status_attribute(options, target_node, "terminate")
+        clear_terminate(options, target_node)
         logger.info("Single-node fencing will be handled by next device in topology")
         return True
 
@@ -852,7 +841,7 @@ def execute_site_fence(
         # Clean up any stale terminate attributes for the target node
         # This prevents re-fencing loops when nodes rejoin after being fenced as peers
         logger.info("Clearing stale terminate attribute for recently restarted node")
-        delete_status_attribute(options, target_node, "terminate")
+        clear_terminate(options, target_node)
 
         logger.info("Single-node fencing will be handled by next device in topology")
         logger.info("Returning success - topology will proceed to next level")
