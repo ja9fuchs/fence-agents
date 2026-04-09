@@ -47,7 +47,15 @@ _join_attributes_cache: Optional[Dict[str, str]] = None
 _cluster_nodes_cache: Optional[Dict[str, str]] = None
 
 def run_cmd(options: Dict[str, str], cmd: str) -> Tuple[int, str, str]:
-    """Wrapper around run_command that logs output at debug level"""
+    """Wrapper around run_command that logs output at debug level.
+
+    Args:
+        options: Options dictionary from fence agent
+        cmd: Shell command to execute
+
+    Returns:
+        Tuple[int, str, str]: Return code, stdout, stderr
+    """
     rc, stdout, stderr = run_command(options, cmd)
     if stdout:
         logger.debug("stdout: %s", stdout.strip())
@@ -89,10 +97,13 @@ def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element
         return None
 
 def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
-    """Get list of all online nodes from cached cluster nodes
+    """Get list of all online nodes from cached cluster nodes.
+
+    Args:
+        options: Options dictionary from fence agent
 
     Returns:
-        set: Set of online node names (nodes with "member" status)
+        Set[str]: Set of online node names (nodes with "member" status)
     """
     cluster_nodes = get_all_cluster_nodes(options)
 
@@ -103,14 +114,14 @@ def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
     return online_nodes
 
 def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str, str]:
-    """Get site attribute for all nodes (single CIB query - optimized)
+    """Get site attribute for all nodes (single CIB query - optimized).
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         site_attribute: Name of the site attribute to query
 
     Returns:
-        dict: {node_name: site_value} mapping (empty dict on error)
+        Dict[str, str]: Mapping of node_name to site_value (empty dict on error)
     """
     attr_safe = shlex.quote(site_attribute)
     cmd = f'cibadmin --query --xpath "//nodes/node[instance_attributes[nvpair[@name=\'{attr_safe}\']]]"'
@@ -146,16 +157,16 @@ def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str
     return node_sites
 
 def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dict[str, str]:
-    """Get join attribute for all nodes (single CIB query - optimized)
+    """Get join attribute for all nodes (single CIB query - optimized).
 
-    Populates global _join_attributes_cache for access by other functions
+    Populates global _join_attributes_cache for access by other functions.
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         join_attribute: Name of the join attribute to query
 
     Returns:
-        dict: {node_name: join_value} mapping (empty dict on error)
+        Dict[str, str]: Mapping of node_name to join_value (empty dict on error)
     """
     global _join_attributes_cache
 
@@ -196,16 +207,22 @@ def get_all_join_attributes(options: Dict[str, str], join_attribute: str) -> Dic
     return join_attrs
 
 def get_cached_join_attributes() -> Dict[str, str]:
-    """Get cached join attributes from global cache
+    """Get cached join attributes from global cache.
 
     Returns:
-        dict: {node_name: join_value} mapping (empty dict if not cached)
+        Dict[str, str]: Mapping of node_name to join_value (empty dict if not cached)
     """
     global _join_attributes_cache
     return _join_attributes_cache if _join_attributes_cache is not None else {}
 
 def set_status_attribute(options: Dict[str, str], node: str, attribute: str, value: str) -> bool:
-    """Set status attribute for a node
+    """Set status attribute for a node.
+
+    Args:
+        options: Options dictionary from fence agent
+        node: Node name to set attribute on
+        attribute: Attribute name to set
+        value: Value to set for the attribute
 
     Returns:
         bool: True on success, False on failure
@@ -231,7 +248,12 @@ def set_status_attribute(options: Dict[str, str], node: str, attribute: str, val
     return False
 
 def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) -> bool:
-    """Delete status attribute for a node
+    """Delete status attribute for a node.
+
+    Args:
+        options: Options dictionary from fence agent
+        node: Node name to delete attribute from
+        attribute: Attribute name to delete
 
     Returns:
         bool: True on success, False on failure
@@ -256,12 +278,15 @@ def delete_status_attribute(options: Dict[str, str], node: str, attribute: str) 
     return False
 
 def get_all_node_states(options: Dict[str, str]) -> Dict[str, ET.Element]:
-    """Query all node_state elements from CIB (single query - optimized)
+    """Query all node_state elements from CIB (single query - optimized).
 
-    Populates global _node_states_cache for access by other functions
+    Populates global _node_states_cache for access by other functions.
+
+    Args:
+        options: Options dictionary from fence agent
 
     Returns:
-        dict: {node_name: ET.Element} mapping (empty dict on error)
+        Dict[str, ET.Element]: Mapping of node_name to ET.Element (empty dict on error)
     """
     global _node_states_cache
 
@@ -299,22 +324,22 @@ def get_all_node_states(options: Dict[str, str]) -> Dict[str, ET.Element]:
     return node_states
 
 def get_cached_node_states() -> Dict[str, ET.Element]:
-    """Get cached node_states from global cache
+    """Get cached node_states from global cache.
 
     Returns:
-        dict: {node_name: ET.Element} mapping (empty dict if not cached)
+        Dict[str, ET.Element]: Mapping of node_name to ET.Element (empty dict if not cached)
     """
     global _node_states_cache
     return _node_states_cache if _node_states_cache is not None else {}
 
 def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[str]:
-    """Extract terminate status attribute from node_state Element
+    """Extract terminate status attribute from node_state Element.
 
     Args:
-        node_state: ET.Element of node_state
+        node_state: ET.Element of node_state, or None
 
     Returns:
-        str or None: Terminate value or None if not found
+        Optional[str]: Terminate value or None if not found
     """
     if node_state is None:
         return None
@@ -327,15 +352,15 @@ def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[
     return None
 
 def get_node_uptime(options: Dict[str, str], node: str, join_attribute: str) -> Optional[int]:
-    """Get node uptime in seconds
+    """Get node uptime in seconds.
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         node: Node name to check
         join_attribute: Fallback join attribute name
 
     Returns:
-        int or None: Uptime in seconds, or None if unavailable
+        Optional[int]: Uptime in seconds, or None if unavailable
     """
     # Try in_ccm from node_state first
     node_states = get_cached_node_states()
@@ -373,10 +398,13 @@ def get_node_uptime(options: Dict[str, str], node: str, join_attribute: str) -> 
     return None
 
 def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
-    """Get dict of all cluster nodes with status (cached)
+    """Get dict of all cluster nodes with status (cached).
+
+    Args:
+        options: Options dictionary from fence agent
 
     Returns:
-        dict: {node_name: status} mapping (e.g., {"node1": "member", "node2": "lost"})
+        Dict[str, str]: Mapping of node_name to status (e.g., {"node1": "member", "node2": "lost"})
     """
     global _cluster_nodes_cache
 
@@ -406,10 +434,13 @@ def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
     return nodes
 
 def get_quorum_status(options: Dict[str, str]) -> Tuple[Optional[int], Optional[bool]]:
-    """Get quorum status
+    """Get quorum status.
+
+    Args:
+        options: Options dictionary from fence agent
 
     Returns:
-        tuple: (expected_votes, quorate_bool)
+        Tuple[Optional[int], Optional[bool]]: Expected votes and quorate status
     """
     (rc, stdout, stderr) = run_cmd(options, "corosync-quorumtool -s")
 
@@ -433,7 +464,11 @@ def get_quorum_status(options: Dict[str, str]) -> Tuple[Optional[int], Optional[
     return expected_votes, quorate
 
 def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> bool:
-    """Check if fencing would cause loss of quorum
+    """Check if fencing would cause loss of quorum.
+
+    Args:
+        options: Options dictionary from fence agent
+        nodes_to_fence_count: Number of nodes to be fenced
 
     Returns:
         bool: True if safe, False if would lose quorum
@@ -458,11 +493,18 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
     logger.info("Quorum check: SAFE - remaining nodes >= threshold")
     return True
 
-def site_fence_test(conn, options):
-    """Main fence logic for site-wide fencing
+def site_fence_test(_conn, options):
+    """Main fence logic for site-wide fencing.
 
     This function is called by fence_action() for both status checks
     and fence operations.
+
+    Args:
+        _conn: Connection object (unused for this agent)
+        options: Options dictionary from fence agent
+
+    Returns:
+        bool: True on success, False on failure
     """
     action = options["--action"]
 
@@ -520,7 +562,12 @@ def site_fence_test(conn, options):
     return False
 
 def get_site_status(options: Dict[str, str], target_node: str, site_attribute: str) -> bool:
-    """Check if site is fenced (for status action)
+    """Check if site is fenced (for status action).
+
+    Args:
+        options: Options dictionary from fence agent
+        target_node: Node name to check status for
+        site_attribute: Name of the site attribute
 
     Returns:
         bool: True if site is "on" (not fenced), False if "off" (fenced)
@@ -601,13 +648,13 @@ def identify_nodes_to_fence(
     uptime_threshold: int,
     join_attribute: str
 ) -> list:
-    """Phase 1: Identify peer nodes eligible for fencing
+    """Phase 1: Identify peer nodes eligible for fencing.
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         target_node: Node being fenced (excluded from peers)
         target_site: Site value of target node
-        node_sites: Dict mapping node names to site values
+        node_sites: Mapping of node names to site values
         uptime_threshold: Minimum uptime in seconds
         join_attribute: Name of join time attribute
 
@@ -656,13 +703,13 @@ def validate_quorum_safety(
     nodes_to_fence: list,
     quorum_safe: bool
 ) -> bool:
-    """Phase 2: Validate quorum safety before fencing
+    """Phase 2: Validate quorum safety before fencing.
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         target_node: Node being fenced
         nodes_to_fence: List of peer nodes to fence
-        quorum_safe: Boolean whether to enforce quorum check
+        quorum_safe: Whether to enforce quorum check
 
     Returns:
         bool: True if safe to proceed, False if would lose quorum
@@ -695,13 +742,13 @@ def set_terminate_attributes(
     nodes_to_fence: list,
     force_reschedule: bool
 ) -> bool:
-    """Phase 3: Set terminate attributes and determine return value
+    """Phase 3: Set terminate attributes and determine return value.
 
     Args:
-        options: Options dictionary
+        options: Options dictionary from fence agent
         target_node: Node being fenced
         nodes_to_fence: List of peer nodes to fence
-        force_reschedule: Boolean whether to fail when peers need fencing
+        force_reschedule: Whether to fail when peers need fencing
 
     Returns:
         bool: True on success, False on failure
@@ -778,12 +825,21 @@ def execute_site_fence(
     quorum_safe: bool,
     force_reschedule: bool
 ) -> bool:
-    """Execute site-wide fencing
+    """Execute site-wide fencing.
 
     Orchestrates 3 phases:
     1. Identify peer nodes eligible for fencing
     2. Validate quorum safety
     3. Set terminate attributes
+
+    Args:
+        options: Options dictionary from fence agent
+        target_node: Node being fenced
+        site_attribute: Name of the site attribute
+        uptime_threshold: Minimum uptime in seconds
+        join_attribute: Name of join time attribute
+        quorum_safe: Whether to enforce quorum check
+        force_reschedule: Whether to fail when peers need fencing
 
     Returns:
         bool: True on success, False on failure
@@ -849,6 +905,11 @@ def execute_site_fence(
     return result
 
 def define_new_opts():
+    """Define custom fence agent options.
+
+    Adds site_attribute, uptime_threshold, join_attribute, quorum_safe,
+    force_reschedule, and dry_run options to the fence agent.
+    """
     all_opt["site_attribute"] = {
         "getopt": ":",
         "longopt": "site-attribute",
@@ -905,6 +966,11 @@ def define_new_opts():
     }
 
 def main():
+    """Main entry point for fence_site agent.
+
+    Initializes options, configures logging, processes inputs,
+    and executes fence actions via the fence_action framework.
+    """
     device_opt = [
         "port",
         "no_password",
