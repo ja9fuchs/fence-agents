@@ -5,7 +5,6 @@
 # When a node is fenced, this agent identifies and fences all other nodes
 # with the same site attribute, enabling parallel site-wide fencing.
 
-import re
 import shlex
 import sys
 import logging
@@ -20,7 +19,6 @@ from fencing import (
     atexit_handler,
     check_input,
     fail,
-    fail_usage,
     fence_action,
     process_input,
     run_command,
