@@ -48,6 +48,17 @@ def run_cmd(options, cmd):
     logger.debug("rc: %d", rc)
     return rc, stdout, stderr
 
+def is_dry_run(options):
+    """Check if dry-run mode is enabled.
+
+    Args:
+        options: Options dictionary from fence agent
+
+    Returns:
+        bool: True if dry-run mode is enabled, False otherwise
+    """
+    return options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
+
 def get_all_online_nodes(options):
     """Get list of all online nodes from cached cluster nodes
 
@@ -180,14 +191,12 @@ def set_status_attribute(options, node, attribute, value):
     Returns:
         bool: True on success, False on failure
     """
-    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
-
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
     value_safe = shlex.quote(value)
     cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --update {value_safe} --type "status"'
 
-    if dry_run:
+    if is_dry_run(options):
         logger.info("DRY-RUN: Would execute: %s", cmd)
         return True
 
@@ -208,13 +217,11 @@ def delete_status_attribute(options, node, attribute):
     Returns:
         bool: True on success, False on failure
     """
-    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
-
     node_safe = shlex.quote(node)
     attr_safe = shlex.quote(attribute)
     cmd = f'crm_attribute --node {node_safe} --name {attr_safe} --delete --type "status"'
 
-    if dry_run:
+    if is_dry_run(options):
         logger.info("DRY-RUN: Would execute: %s", cmd)
         return True
 
@@ -798,8 +805,7 @@ def execute_site_fence(options, target_node, site_attribute, uptime_threshold, j
     # Phase 3: Set terminate attributes
     result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
 
-    dry_run = options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
-    if dry_run:
+    if is_dry_run(options):
         logger.info("DRY-RUN: Would return %s", "SUCCESS" if result else "FAILURE")
 
     return result
