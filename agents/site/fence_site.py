@@ -837,12 +837,6 @@ def execute_site_fence(
         logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
-
-        # Clean up any stale terminate attributes for the target node
-        # This prevents re-fencing loops when nodes rejoin after being fenced as peers
-        logger.info("Clearing stale terminate attribute for recently restarted node")
-        clear_terminate(options, target_node)
-
         logger.info("Single-node fencing will be handled by next device in topology")
         logger.info("Returning success - topology will proceed to next level")
         return True
