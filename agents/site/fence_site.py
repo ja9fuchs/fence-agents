@@ -1001,9 +1001,9 @@ Actions:
 
 Behavior:
 - Target node is fenced by the next device in topology (the real fence device)
-- Returns OFF (failure) when site-attribute is missing → next device handles single-node fencing
-- Returns OFF (failure) when uptime data unavailable → next device handles single-node fencing
-- Returns OFF (failure) when target node uptime is lower than threshold → prevents loop after restart
+- Returns OFF (failure) when site-attribute is missing -> next device handles single-node fencing
+- Returns OFF (failure) when uptime data unavailable -> next device handles single-node fencing
+- Returns OFF (failure) when target node uptime is lower than threshold -> prevents loop after restart
 - Returns success when terminate attributes are set for site nodes
 
 Status checking:
