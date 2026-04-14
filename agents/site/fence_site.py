@@ -73,6 +73,44 @@ def is_dry_run(options: Dict[str, str]) -> bool:
     return options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
 
 
+def is_called_from_tty() -> bool:
+    """Check if script is called interactively (not by Pacemaker).
+
+    When Pacemaker calls fence agents, it pipes parameters via stdin.
+    Interactive command line usage has stdin as a TTY.
+
+    Returns:
+        True if called from command line (TTY), False if called by Pacemaker
+    """
+    return sys.stdin.isatty()
+
+
+def handle_target_terminate(
+    options: Dict[str, str],
+    target_node: str,
+    base_result: bool = True
+) -> bool:
+    """Handle target node terminate based on calling context.
+
+    Topology mode (Pacemaker): target fenced by next device
+    Standalone mode (TTY): set terminate on target
+
+    Args:
+        options: Options dictionary
+        target_node: Node being fenced
+        base_result: Return value for topology mode (default True)
+
+    Returns:
+        True on success, False on failure
+    """
+    if is_called_from_tty():
+        logger.info("Standalone mode: setting terminate for target node %s", target_node)
+        return set_terminate(options, target_node)
+    else:
+        logger.info("Topology mode: target %s will be fenced by next device", target_node)
+        return base_result
+
+
 def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element]:
     """Safely parse XML with comprehensive error logging.
 
@@ -788,10 +826,8 @@ def execute_site_fence(
     # Get target node's site from batch query result
     target_site = node_sites.get(target_node)
     if not target_site:
-        logger.info("No site attribute for target node: %s, proceeding with single target",
-                    target_node)
-        logger.info("Target %s will be fenced by next device in topology", target_node)
-        return True
+        logger.info("No site attribute for target node: %s", target_node)
+        return handle_target_terminate(options, target_node)
 
     logger.info("Target node %s is on site: %s", target_node, target_site)
 
@@ -805,8 +841,7 @@ def execute_site_fence(
         logger.info("Target node %s uptime %ds < threshold %ds",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
-        logger.info("Target %s will be fenced by next device in topology", target_node)
-        return True
+        return handle_target_terminate(options, target_node)
     else:
         logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
@@ -816,18 +851,20 @@ def execute_site_fence(
         uptime_threshold
     )
 
-    # If no peer nodes need fencing, return success immediately
+    # If no peer nodes need fencing
     if not nodes_to_fence:
-        logger.info("No peer nodes require fencing")
-        logger.info("Target %s will be fenced by next device in topology", target_node)
-        return True
+        return handle_target_terminate(options, target_node)
 
     # Phase 2: Quorum safety check
     if not validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
         return False
 
-    # Phase 3: Set terminate attributes
+    # Phase 3: Set terminate attributes for peer nodes
     result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
+
+    # Handle target node terminate based on calling context
+    if not handle_target_terminate(options, target_node, result):
+        result = False
 
     if is_dry_run(options):
         logger.info("DRY-RUN: Would return %s", "SUCCESS" if result else "FAILURE")
