@@ -539,19 +539,13 @@ def get_site_status(
     # Get target node's site from batch query result
     target_site = node_sites.get(target_node)
     if not target_site:
-        logger.debug("Node %s has no site attribute, checking only target", target_node)
-        # Fallback: check only target node
-        terminate = get_terminate_from_node_state(node_states.get(target_node))
-        if terminate and terminate.lower() in ["true", "1"]:
-            logger.debug("Node %s has terminate=true, returning off", target_node)
-            return False  # off = fenced
-        logger.debug("Node %s has no terminate, returning on", target_node)
-        return True  # on = not fenced
+        logger.debug("Node %s has no site attribute - managed as single target", target_node)
+        return True  # on = processed in next device in topology
     site_nodes = [n for n, s in node_sites.items() if s == target_site]
 
     if not site_nodes:
-        logger.debug("No nodes found on site %s, returning on", target_site)
-        return True  # on = not fenced
+        logger.debug("No nodes found on site %s", target_site)
+        return True  # on = processed in next device in topology
 
     # Check status of peer nodes on site (exclude target - it's fenced by real device)
     peer_nodes = [n for n in site_nodes if n != target_node]
@@ -808,7 +802,7 @@ def execute_site_fence(
                        target_node)
         logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
     elif target_uptime < uptime_threshold:
-        logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
+        logger.info("Target node %s uptime %ds < threshold %ds",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
         logger.info("Target %s will be fenced by next device in topology", target_node)
@@ -824,7 +818,7 @@ def execute_site_fence(
 
     # If no peer nodes need fencing, return success immediately
     if not nodes_to_fence:
-        logger.info("No peer nodes require fencing - returning success")
+        logger.info("No peer nodes require fencing")
         logger.info("Target %s will be fenced by next device in topology", target_node)
         return True
 
