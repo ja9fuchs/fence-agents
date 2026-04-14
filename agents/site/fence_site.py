@@ -674,11 +674,6 @@ def validate_quorum_safety(
     logger.info("Phase 2: Quorum safety check for %d nodes (target + %d peers)",
                 total_nodes_to_fence, len(nodes_to_fence))
 
-    if len(nodes_to_fence) == 0:
-        logger.info("No other nodes on site planned for termination")
-        logger.info("Only target node will be fenced by real device, allowing operation")
-        return True
-
     if not quorum_safe:
         logger.info("Quorum safety check DISABLED by configuration")
         return True
@@ -801,7 +796,7 @@ def execute_site_fence(
     if not target_site:
         logger.info("No site attribute for target node: %s, proceeding with single target",
                     target_node)
-        logger.info("Single-node fencing will be handled by next device in topology")
+        logger.info("Target %s will be fenced by next device in topology", target_node)
         return True
 
     logger.info("Target node %s is on site: %s", target_node, target_site)
@@ -816,8 +811,7 @@ def execute_site_fence(
         logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
-        logger.info("Single-node fencing will be handled by next device in topology")
-        logger.info("Returning success - topology will proceed to next level")
+        logger.info("Target %s will be fenced by next device in topology", target_node)
         return True
     else:
         logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
@@ -827,6 +821,12 @@ def execute_site_fence(
         options, target_node, target_site, node_sites,
         uptime_threshold
     )
+
+    # If no peer nodes need fencing, return success immediately
+    if not nodes_to_fence:
+        logger.info("No peer nodes require fencing - returning success")
+        logger.info("Target %s will be fenced by next device in topology", target_node)
+        return True
 
     # Phase 2: Quorum safety check
     if not validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
