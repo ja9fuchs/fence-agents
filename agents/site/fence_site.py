@@ -221,7 +221,6 @@ def set_terminate(options: Dict[str, str], node: str) -> bool:
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
     if rc == 0:
-        logger.info("Set terminate=true for node %s", node)
         return True
 
     logger.error("Failed to set terminate for node %s (rc=%d)", node, rc)
