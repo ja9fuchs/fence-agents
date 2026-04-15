@@ -634,7 +634,7 @@ def identify_nodes_to_fence(
     node_sites: Dict[str, str],
     uptime_threshold: int
 ) -> list:
-    """Phase 1: Identify peer nodes eligible for fencing.
+    """Identify peer nodes eligible for fencing.
 
     Args:
         options: Options dictionary from fence agent
@@ -647,7 +647,7 @@ def identify_nodes_to_fence(
         Node names eligible for fencing (empty if none)
     """
     nodes_to_fence = []
-    logger.info("Phase 1: Identifying nodes to fence")
+    logger.info("Identifying peer nodes eligible for fencing")
 
     for node, node_site in node_sites.items():
         logger.debug("Checking node: %s", node)
@@ -679,7 +679,7 @@ def identify_nodes_to_fence(
 
         nodes_to_fence.append(node)
 
-    logger.info("Phase 1 complete: %d peer nodes eligible for fencing", len(nodes_to_fence))
+    logger.info("Found %d peer nodes eligible for fencing", len(nodes_to_fence))
     return nodes_to_fence
 
 
@@ -689,7 +689,7 @@ def validate_quorum_safety(
     nodes_to_fence: list,
     quorum_safe: bool
 ) -> bool:
-    """Phase 2: Validate quorum safety before fencing.
+    """Validate quorum safety before fencing.
 
     Args:
         options: Options dictionary from fence agent
@@ -702,7 +702,7 @@ def validate_quorum_safety(
     """
     # Include target node in count (it will be fenced by real device, not by terminate attribute)
     total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
-    logger.info("Phase 2: Quorum safety check for %d nodes (target + %d peers)",
+    logger.info("Quorum safety check for %d nodes (target + %d peers)",
                 total_nodes_to_fence, len(nodes_to_fence))
 
     if not quorum_safe:
@@ -714,7 +714,7 @@ def validate_quorum_safety(
         logger.error("Quorum safety check FAILED - aborting")
         return False
 
-    logger.info("Phase 2 complete: Quorum safety check PASSED")
+    logger.info("Quorum safety check PASSED")
     return True
 
 
@@ -724,7 +724,7 @@ def set_terminate_attributes(
     nodes_to_fence: list,
     force_reschedule: bool
 ) -> bool:
-    """Phase 3: Set terminate attributes and determine return value.
+    """Set terminate attributes and determine return value.
 
     Args:
         options: Options dictionary from fence agent
@@ -736,7 +736,7 @@ def set_terminate_attributes(
         True on success, False on failure
     """
     total_nodes = len(nodes_to_fence)
-    logger.info("Phase 3: Setting terminate for %d peer nodes", total_nodes)
+    logger.info("Setting terminate for %d peer nodes", total_nodes)
 
     # Get cached node states to check current terminate values
     node_states = get_cached_node_states()
@@ -775,14 +775,14 @@ def set_terminate_attributes(
     if force_reschedule and peer_terminate_new > 0:
         logger.info("Forced parallel fencing - failing for target node %s", target_node)
         logger.info("Fencing of %s will be rescheduled with peer nodes", target_node)
-        logger.info("Phase 3 complete: Returning FAILURE to trigger scheduler")
+        logger.info("Returning FAILURE to trigger scheduler")
         return False
 
     if peer_terminate_new > 0:
         logger.info("%d peer nodes marked for termination", peer_terminate_new)
 
     logger.info("Target %s will be fenced by next device in topology", target_node)
-    logger.info("Phase 3 complete: Returning SUCCESS")
+    logger.info("Returning SUCCESS")
     return failed_count == 0
 
 
@@ -796,10 +796,11 @@ def execute_site_fence(
 ) -> bool:
     """Execute site-wide fencing.
 
-    Orchestrates 3 phases:
-    1. Identify peer nodes eligible for fencing
-    2. Validate quorum safety
-    3. Set terminate attributes
+    Orchestrates site-wide fencing by:
+    - Identifying peer nodes eligible for fencing
+    - Validating quorum safety
+    - Setting terminate attributes on peer nodes
+    - Handling target node based on calling context
 
     Args:
         options: Options dictionary from fence agent
@@ -844,7 +845,7 @@ def execute_site_fence(
     else:
         logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
-    # Phase 1: Identify nodes to fence
+    # Identify peer nodes to fence
     nodes_to_fence = identify_nodes_to_fence(
         options, target_node, target_site, node_sites,
         uptime_threshold
@@ -854,11 +855,11 @@ def execute_site_fence(
     if not nodes_to_fence:
         return handle_target_terminate(options, target_node)
 
-    # Phase 2: Quorum safety check
+    # Quorum safety check
     if not validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
         return False
 
-    # Phase 3: Set terminate attributes for peer nodes
+    # Set terminate attributes for peer nodes
     result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
 
     # Handle target node terminate based on calling context
