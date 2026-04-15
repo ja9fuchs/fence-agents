@@ -73,44 +73,6 @@ def is_dry_run(options: Dict[str, str]) -> bool:
     return options.get("--dry-run", "false").lower() in ["1", "yes", "on", "true"]
 
 
-def is_called_from_tty() -> bool:
-    """Check if script is called interactively (not by Pacemaker).
-
-    When Pacemaker calls fence agents, it pipes parameters via stdin.
-    Interactive command line usage has stdin as a TTY.
-
-    Returns:
-        True if called from command line (TTY), False if called by Pacemaker
-    """
-    return sys.stdin.isatty()
-
-
-def handle_target_terminate(
-    options: Dict[str, str],
-    target_node: str,
-    base_result: bool = True
-) -> bool:
-    """Handle target node terminate based on calling context.
-
-    Topology mode (Pacemaker): target fenced by next device
-    Standalone mode (TTY): set terminate on target
-
-    Args:
-        options: Options dictionary
-        target_node: Node being fenced
-        base_result: Return value for topology mode (default True)
-
-    Returns:
-        True on success, False on failure
-    """
-    if is_called_from_tty():
-        logger.info("Standalone mode: setting terminate for target node %s", target_node)
-        return set_terminate(options, target_node)
-    else:
-        logger.info("Topology mode: target %s will be fenced by next device", target_node)
-        return base_result
-
-
 def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element]:
     """Safely parse XML with comprehensive error logging.
 
@@ -221,6 +183,7 @@ def set_terminate(options: Dict[str, str], node: str) -> bool:
     (rc, stdout, stderr) = run_cmd(options, cmd)
 
     if rc == 0:
+        logger.info("Set terminate=true for node %s", node)
         return True
 
     logger.error("Failed to set terminate for node %s (rc=%d)", node, rc)
@@ -576,13 +539,19 @@ def get_site_status(
     # Get target node's site from batch query result
     target_site = node_sites.get(target_node)
     if not target_site:
-        logger.debug("Node %s has no site attribute - managed as single target", target_node)
-        return True  # on = processed in next device in topology
+        logger.debug("Node %s has no site attribute, checking only target", target_node)
+        # Fallback: check only target node
+        terminate = get_terminate_from_node_state(node_states.get(target_node))
+        if terminate and terminate.lower() in ["true", "1"]:
+            logger.debug("Node %s has terminate=true, returning off", target_node)
+            return False  # off = fenced
+        logger.debug("Node %s has no terminate, returning on", target_node)
+        return True  # on = not fenced
     site_nodes = [n for n, s in node_sites.items() if s == target_site]
 
     if not site_nodes:
-        logger.debug("No nodes found on site %s", target_site)
-        return True  # on = processed in next device in topology
+        logger.debug("No nodes found on site %s, returning on", target_site)
+        return True  # on = not fenced
 
     # Check status of peer nodes on site (exclude target - it's fenced by real device)
     peer_nodes = [n for n in site_nodes if n != target_node]
@@ -634,7 +603,7 @@ def identify_nodes_to_fence(
     node_sites: Dict[str, str],
     uptime_threshold: int
 ) -> list:
-    """Identify peer nodes eligible for fencing.
+    """Phase 1: Identify peer nodes eligible for fencing.
 
     Args:
         options: Options dictionary from fence agent
@@ -647,7 +616,7 @@ def identify_nodes_to_fence(
         Node names eligible for fencing (empty if none)
     """
     nodes_to_fence = []
-    logger.info("Identifying peer nodes eligible for fencing")
+    logger.info("Phase 1: Identifying nodes to fence")
 
     for node, node_site in node_sites.items():
         logger.debug("Checking node: %s", node)
@@ -679,13 +648,12 @@ def identify_nodes_to_fence(
 
         nodes_to_fence.append(node)
 
-    logger.info("Found %d peer nodes eligible for fencing", len(nodes_to_fence))
+    logger.info("Phase 1 complete: %d peer nodes eligible for fencing", len(nodes_to_fence))
     return nodes_to_fence
 
 
 def validate_quorum_safety(
     options: Dict[str, str],
-    target_node: str,
     nodes_to_fence: list,
     quorum_safe: bool
 ) -> bool:
@@ -693,17 +661,21 @@ def validate_quorum_safety(
 
     Args:
         options: Options dictionary from fence agent
-        target_node: Node being fenced
         nodes_to_fence: List of peer nodes to fence
         quorum_safe: Whether to enforce quorum check
 
     Returns:
         True if safe to proceed, False if would lose quorum
     """
-    # Include target node in count (it will be fenced by real device, not by terminate attribute)
+    # Include target node in count (it will be fenced by real device,
+    # not by terminate attribute)
     total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
     logger.info("Quorum safety check for %d nodes (target + %d peers)",
                 total_nodes_to_fence, len(nodes_to_fence))
+
+    if len(nodes_to_fence) == 0:
+        logger.info("Only target node will be fenced, allowing operation")
+        return True
 
     if not quorum_safe:
         logger.info("Quorum safety check DISABLED by configuration")
@@ -724,19 +696,19 @@ def set_terminate_attributes(
     nodes_to_fence: list,
     force_reschedule: bool
 ) -> bool:
-    """Set terminate attributes and determine return value.
+    """Phase 3: Set terminate attributes and determine return value.
 
     Args:
         options: Options dictionary from fence agent
         target_node: Node being fenced
         nodes_to_fence: List of peer nodes to fence
-        force_reschedule: Whether to fail and reschedule when peer need fencing
+        force_reschedule: Whether to fail when peers need fencing
 
     Returns:
         True on success, False on failure
     """
-    total_nodes = len(nodes_to_fence)
-    logger.info("Setting terminate for %d peer nodes", total_nodes)
+    total_nodes = len(nodes_to_fence) + 1  # +1 for target
+    logger.info("Phase 3: Setting terminate for %d site nodes (including target)", total_nodes)
 
     # Get cached node states to check current terminate values
     node_states = get_cached_node_states()
@@ -747,7 +719,20 @@ def set_terminate_attributes(
     failed_nodes = []
     peer_terminate_new = 0  # Track if any peer nodes had terminate set
 
-    # Set terminate for peer nodes (target node is fenced by real device)
+    # Set terminate for target node
+    current_terminate = get_terminate_from_node_state(node_states.get(target_node))
+    if current_terminate and current_terminate.lower() in ["true", "1"]:
+        logger.info("Target node %s already has terminate=true, skipping", target_node)
+        already_set += 1
+    else:
+        logger.info("Setting terminate for target node: %s", target_node)
+        if set_terminate(options, target_node):
+            newly_set += 1
+        else:
+            failed_count += 1
+            failed_nodes.append(target_node)
+
+    # Set terminate for peer nodes
     for node in nodes_to_fence:
         current_terminate = get_terminate_from_node_state(node_states.get(node))
         if current_terminate and current_terminate.lower() in ["true", "1"]:
@@ -773,16 +758,22 @@ def set_terminate_attributes(
 
     # Determine return value based on mode
     if force_reschedule and peer_terminate_new > 0:
-        logger.info("Forced parallel fencing - failing for target node %s", target_node)
-        logger.info("Fencing of %s will be rescheduled with peer nodes", target_node)
-        logger.info("Returning FAILURE to trigger scheduler")
+        logger.info("Site-wide fencing active - fence_site fails for target node %s",
+                    target_node)
+        logger.info("Fencing of %s must be rescheduled after peer nodes are fenced",
+                    target_node)
+        logger.info("Phase 3 complete: Returning FAILURE to trigger scheduler")
         return False
 
+    # Default behavior: return success if terminate attributes set successfully
     if peer_terminate_new > 0:
-        logger.info("%d peer nodes marked for termination", peer_terminate_new)
+        logger.info("Peer nodes set terminate - target %s will be fenced by next device",
+                    target_node)
+    else:
+        logger.info("No peer nodes on site - target %s will be fenced by next device",
+                    target_node)
 
-    logger.info("Target %s will be fenced by next device in topology", target_node)
-    logger.info("Returning SUCCESS")
+    logger.info("Phase 3 complete: Returning SUCCESS")
     return failed_count == 0
 
 
@@ -796,11 +787,10 @@ def execute_site_fence(
 ) -> bool:
     """Execute site-wide fencing.
 
-    Orchestrates site-wide fencing by:
-    - Identifying peer nodes eligible for fencing
-    - Validating quorum safety
-    - Setting terminate attributes on peer nodes
-    - Handling target node based on calling context
+    Orchestrates 3 phases:
+    1. Identify peer nodes eligible for fencing
+    2. Validate quorum safety
+    3. Set terminate attributes
 
     Args:
         options: Options dictionary from fence agent
@@ -808,7 +798,7 @@ def execute_site_fence(
         site_attribute: Name of the site attribute
         uptime_threshold: Minimum uptime in seconds
         quorum_safe: Whether to enforce quorum check
-        force_reschedule: Whether to fail and reschedule when peer need fencing
+        force_reschedule: Whether to fail when peers need fencing
 
     Returns:
         True on success, False on failure
@@ -817,7 +807,7 @@ def execute_site_fence(
     logger.info("Site attribute: %s, uptime threshold: %ds, force parallel: %s",
                 site_attribute, uptime_threshold, force_reschedule)
 
-    # Get all node states in one query
+    # Query all node states once
     get_all_node_states(options)
 
     # Get all node sites in one query
@@ -826,8 +816,12 @@ def execute_site_fence(
     # Get target node's site from batch query result
     target_site = node_sites.get(target_node)
     if not target_site:
-        logger.info("No site attribute for target node: %s", target_node)
-        return handle_target_terminate(options, target_node)
+        logger.info("No site attribute for target node: %s, proceeding with single target",
+                    target_node)
+        # Clean up any stale terminate attributes
+        clear_terminate(options, target_node)
+        logger.info("Single-node fencing will be handled by next device in topology")
+        return True
 
     logger.info("Target node %s is on site: %s", target_node, target_site)
 
@@ -838,33 +832,27 @@ def execute_site_fence(
                        target_node)
         logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
     elif target_uptime < uptime_threshold:
-        logger.info("Target node %s uptime %ds < threshold %ds",
+        logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
-        return handle_target_terminate(options, target_node)
+        logger.info("Single-node fencing will be handled by next device in topology")
+        logger.info("Returning success - topology will proceed to next level")
+        return True
     else:
         logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
-    # Identify peer nodes to fence
+    # Phase 1: Identify nodes to fence
     nodes_to_fence = identify_nodes_to_fence(
         options, target_node, target_site, node_sites,
         uptime_threshold
     )
 
-    # If no peer nodes need fencing
-    if not nodes_to_fence:
-        return handle_target_terminate(options, target_node)
-
-    # Quorum safety check
-    if not validate_quorum_safety(options, target_node, nodes_to_fence, quorum_safe):
+    # Phase 2: Quorum safety check
+    if not validate_quorum_safety(options, nodes_to_fence, quorum_safe):
         return False
 
-    # Set terminate attributes for peer nodes
+    # Phase 3: Set terminate attributes
     result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
-
-    # Handle target node terminate based on calling context
-    if not handle_target_terminate(options, target_node, result):
-        result = False
 
     if is_dry_run(options):
         logger.info("DRY-RUN: Would return %s", "SUCCESS" if result else "FAILURE")
