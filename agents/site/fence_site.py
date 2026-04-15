@@ -37,7 +37,7 @@ DEFAULT_SHELL_TIMEOUT = "30"  # Seconds for shell command timeout
 logger = logging.getLogger()
 
 # Global caches (populated once per execution)
-# Note: These caches are not thread-safe. Fence agents run single-threaded.
+# Note: These caches are not thread-safe. But fence agents run single-threaded.
 _node_states_cache: Optional[Dict[str, ET.Element]] = None
 _cluster_nodes_cache: Optional[Dict[str, str]] = None
 
@@ -425,10 +425,8 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
 
     if remaining_nodes < quorum_threshold:
         logger.error("SAFETY: Fencing would cause loss of quorum!")
-        logger.error(
-            "SAFETY: Remaining nodes (%d) < threshold (%d)",
-            remaining_nodes, quorum_threshold
-        )
+        logger.error("SAFETY: Remaining nodes (%d) < threshold (%d)",
+                     remaining_nodes, quorum_threshold)
         return False
 
     logger.info("Quorum check: SAFE - remaining nodes >= threshold")
@@ -438,8 +436,8 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
 def site_fence_test(_conn, options):
     """Main fence logic for site-wide fencing.
 
-    This function is called by fence_action() for both status checks
-    and fence operations.
+    This function is called by fence_action(). It validates the input
+    parameters and applies the "on" action.
 
     Args:
         _conn: Connection object (unused for this agent)
