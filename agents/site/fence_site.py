@@ -607,7 +607,7 @@ def set_terminate_attributes(
         options: Options dictionary from fence agent
         target_node: Node being fenced
         nodes_to_fence: List of peer nodes to fence
-        force_reschedule: Whether to fail when peers need fencing
+        force_reschedule: Whether to fail and force reschedule with peers
 
     Returns:
         True on success, False on failure
@@ -622,9 +622,11 @@ def set_terminate_attributes(
     newly_set = 0
     failed_count = 0
     failed_nodes = []
-    peer_terminate_new = 0  # Track if any peer nodes had terminate set
+    peer_terminate_new = 0  # Track if any peer nodes get terminate set
 
     # Set terminate for target node
+    # Update target node before peers to prevent the peer terminate from
+    # scheduling before the target node processing returned
     current_terminate = get_terminate_from_node_state(node_states.get(target_node))
     if current_terminate and current_terminate.lower() in ["true", "1"]:
         logger.info("Target node %s already has terminate=true, skipping", target_node)
@@ -637,7 +639,7 @@ def set_terminate_attributes(
             failed_count += 1
             failed_nodes.append(target_node)
 
-    # Set terminate for peer nodes
+    # Set terminate for peer nodes (after target node for scheduling timing)
     for node in nodes_to_fence:
         current_terminate = get_terminate_from_node_state(node_states.get(node))
         if current_terminate and current_terminate.lower() in ["true", "1"]:
@@ -663,7 +665,7 @@ def set_terminate_attributes(
 
     # Determine return value based on mode
     if force_reschedule and peer_terminate_new > 0:
-        logger.info("Site-wide fencing active - fence_site fails for target node %s",
+        logger.info("Simultaneous site-wide fencing - fence_site fails for target node %s",
                     target_node)
         logger.info("Returning FAILURE to trigger scheduler")
         return False
