@@ -491,9 +491,10 @@ def site_fence_test(_conn, options):
         logger.warning("Invalid uptime threshold %d, using 0", uptime_threshold)
         uptime_threshold = 0
 
-    # For status check
+    # For status check - hand over to next device in topology
     if action == "status":
-        return get_site_status(options, target_node, site_attribute)
+        logger.info("Status check - deferring to real device in topology")
+        return True
 
     # For off/reboot actions
     if action in ["off", "reboot"]:
@@ -508,90 +509,6 @@ def site_fence_test(_conn, options):
 
     logger.warning("Action %s not handled", action)
     return False
-
-
-def get_site_status(
-    options: Dict[str, str],
-    target_node: str,
-    site_attribute: str
-) -> bool:
-    """Check if site is fenced (for status action).
-
-    Args:
-        options: Options dictionary from fence agent
-        target_node: Node name to check status for
-        site_attribute: Name of the site attribute
-
-    Returns:
-        True if site is "on" (not fenced), False if "off" (fenced)
-    """
-    logger.debug("Status check for node %s", target_node)
-
-    # Query all node states once (optimization: single CIB query)
-    get_all_node_states(options)
-    node_states = get_cached_node_states()
-
-    # Get all node sites in one query (optimization: single CIB query)
-    node_sites = get_all_node_sites(options, site_attribute)
-
-    # Get target node's site from batch query result
-    target_site = node_sites.get(target_node)
-    if not target_site:
-        logger.debug("Node %s has no site attribute, checking only target", target_node)
-        # Fallback: check only target node
-        terminate = get_terminate_from_node_state(node_states.get(target_node))
-        if terminate and terminate.lower() in ["true", "1"]:
-            logger.debug("Node %s has terminate=true, returning off", target_node)
-            return False  # off = fenced
-        logger.debug("Node %s has no terminate, returning on", target_node)
-        return True  # on = not fenced
-    site_nodes = [n for n, s in node_sites.items() if s == target_site]
-
-    if not site_nodes:
-        logger.debug("No nodes found on site %s, returning on", target_site)
-        return True  # on = not fenced
-
-    # Check status of peer nodes on site (exclude target - it's fenced by real device)
-    peer_nodes = [n for n in site_nodes if n != target_node]
-    logger.debug("Checking status for %d peer nodes on site %s (excluding target %s)",
-                 len(peer_nodes), target_site, target_node)
-
-    # Get all online nodes once (optimization: single crm_mon call)
-    online_nodes = get_all_online_nodes(options)
-
-    # Check terminate status of peer nodes
-    online_nodes_total = 0
-    online_nodes_terminated = 0
-    offline_nodes = 0
-
-    for node in peer_nodes:
-        if node in online_nodes:
-            online_nodes_total += 1
-            terminate = get_terminate_from_node_state(node_states.get(node))
-            if terminate and terminate.lower() in ["true", "1"]:
-                online_nodes_terminated += 1
-                logger.debug("Node %s (ONLINE) has terminate=true", node)
-            else:
-                logger.debug("Node %s (ONLINE) does NOT have terminate=true", node)
-        else:
-            offline_nodes += 1
-            logger.debug("Node %s is OFFLINE, skipping terminate check", node)
-
-    logger.debug("Site %s status (peer nodes only): %d/%d online terminated, %d offline",
-                 target_site, online_nodes_terminated, online_nodes_total, offline_nodes)
-
-    # Return False (off/fenced) if all online peer nodes are terminated
-    if online_nodes_total > 0 and online_nodes_terminated == online_nodes_total:
-        logger.debug("All online peer nodes terminated, returning off")
-        return False  # off = fenced
-
-    if online_nodes_total == 0 and offline_nodes > 0:
-        # All peer nodes offline - site is down
-        logger.debug("All peer nodes offline, returning off")
-        return False  # off = fenced
-
-    logger.debug("Not all online peer nodes terminated, returning on")
-    return True  # on = not fenced
 
 
 def identify_nodes_to_fence(
@@ -936,7 +853,6 @@ def main():
         "port",
         "no_password",
         "no_login",
-        "no_status",
         "site_attribute",
         "uptime_threshold",
         "quorum_safe",
