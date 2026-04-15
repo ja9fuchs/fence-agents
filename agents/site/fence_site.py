@@ -606,7 +606,7 @@ def set_terminate_attributes(
     nodes_to_fence: list,
     force_reschedule: bool
 ) -> bool:
-    """Phase 3: Set terminate attributes and determine return value.
+    """Set terminate attributes and determine return value.
 
     Args:
         options: Options dictionary from fence agent
@@ -618,7 +618,7 @@ def set_terminate_attributes(
         True on success, False on failure
     """
     total_nodes = len(nodes_to_fence) + 1  # +1 for target
-    logger.info("Phase 3: Setting terminate for %d site nodes (including target)", total_nodes)
+    logger.info("Setting terminate for %d site nodes (including target)", total_nodes)
 
     # Get cached node states to check current terminate values
     node_states = get_cached_node_states()
@@ -670,9 +670,7 @@ def set_terminate_attributes(
     if force_reschedule and peer_terminate_new > 0:
         logger.info("Site-wide fencing active - fence_site fails for target node %s",
                     target_node)
-        logger.info("Fencing of %s must be rescheduled after peer nodes are fenced",
-                    target_node)
-        logger.info("Phase 3 complete: Returning FAILURE to trigger scheduler")
+        logger.info("Returning FAILURE to trigger scheduler")
         return False
 
     # Default behavior: return success if terminate attributes set successfully
@@ -683,7 +681,6 @@ def set_terminate_attributes(
         logger.info("No peer nodes on site - target %s will be fenced by next device",
                     target_node)
 
-    logger.info("Phase 3 complete: Returning SUCCESS")
     return failed_count == 0
 
 
@@ -697,10 +694,11 @@ def execute_site_fence(
 ) -> bool:
     """Execute site-wide fencing.
 
-    Orchestrates 3 phases:
-    1. Identify peer nodes eligible for fencing
-    2. Validate quorum safety
-    3. Set terminate attributes
+    Orchestrates the following:
+    - Identify peer nodes eligible for fencing
+    - Validate quorum safety
+    - Set terminate attributes
+    - Handle single node mode when applicable
 
     Args:
         options: Options dictionary from fence agent
