@@ -723,8 +723,6 @@ def execute_site_fence(
     if not target_site:
         logger.info("No site attribute for target node: %s, proceeding with single target",
                     target_node)
-        # Clean up any stale terminate attributes
-        clear_terminate(options, target_node)
         logger.info("Target %s will be fenced by next device in topology", target_node)
         return True
 
