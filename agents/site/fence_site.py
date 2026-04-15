@@ -513,7 +513,7 @@ def identify_nodes_to_fence(
     node_sites: Dict[str, str],
     uptime_threshold: int
 ) -> list:
-    """Phase 1: Identify peer nodes eligible for fencing.
+    """Identify peer nodes eligible for fencing.
 
     Args:
         options: Options dictionary from fence agent
@@ -526,7 +526,7 @@ def identify_nodes_to_fence(
         Node names eligible for fencing (empty if none)
     """
     nodes_to_fence = []
-    logger.info("Phase 1: Identifying nodes to fence")
+    logger.info("Identifying nodes to fence")
 
     for node, node_site in node_sites.items():
         logger.debug("Checking node: %s", node)
@@ -558,7 +558,7 @@ def identify_nodes_to_fence(
 
         nodes_to_fence.append(node)
 
-    logger.info("Phase 1 complete: %d peer nodes eligible for fencing", len(nodes_to_fence))
+    logger.info("%d peer nodes eligible for fencing", len(nodes_to_fence))
     return nodes_to_fence
 
 
@@ -751,7 +751,7 @@ def execute_site_fence(
     else:
         logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
 
-    # Phase 1: Identify nodes to fence
+    # Identify nodes to fence
     nodes_to_fence = identify_nodes_to_fence(
         options, target_node, target_site, node_sites,
         uptime_threshold
