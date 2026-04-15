@@ -464,7 +464,7 @@ def site_fence_test(_conn, options):
             logger.error("Failed to clear terminate attribute for node %s", target_node)
             return False
 
-    # Verify target node is a cluster member (for off/reboot/status actions)
+    # Verify target node is a cluster member (for off/reboot actions)
     cluster_nodes = get_all_cluster_nodes(options)
     if cluster_nodes and target_node not in cluster_nodes:
         logger.error("Target node '%s' is not a cluster member", target_node)
@@ -490,11 +490,6 @@ def site_fence_test(_conn, options):
     if uptime_threshold < 0:
         logger.warning("Invalid uptime threshold %d, using 0", uptime_threshold)
         uptime_threshold = 0
-
-    # For status check - hand over to next device in topology
-    if action == "status":
-        logger.info("Status check - deferring to real device in topology")
-        return True
 
     # For off/reboot actions
     if action in ["off", "reboot"]:
@@ -853,6 +848,7 @@ def main():
         "port",
         "no_password",
         "no_login",
+        "no_status",
         "site_attribute",
         "uptime_threshold",
         "quorum_safe",
