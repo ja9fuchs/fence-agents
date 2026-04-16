@@ -735,7 +735,7 @@ def execute_site_fence(
                        target_node)
         logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
     elif target_uptime < uptime_threshold:
-        logger.info("Target node %s uptime %ds < threshold %ds, returning OFF",
+        logger.info("Target node %s uptime %ds < threshold %ds",
                     target_node, target_uptime, uptime_threshold)
         logger.info("Node recently restarted - skipping site-wide fencing")
         logger.info("Target %s will be fenced by next device in topology", target_node)
