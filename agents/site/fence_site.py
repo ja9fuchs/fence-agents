@@ -423,9 +423,8 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
                 nodes_to_fence_count, remaining_nodes, quorum_threshold)
 
     if remaining_nodes < quorum_threshold:
-        logger.error("SAFETY: Fencing would cause loss of quorum!")
-        logger.error("SAFETY: Remaining nodes (%d) < threshold (%d)",
-                     remaining_nodes, quorum_threshold)
+        logger.warning("Quorum safety: Remaining nodes (%d) < threshold (%d)",
+                       remaining_nodes, quorum_threshold)
         return False
 
     logger.info("Quorum check: SAFE - remaining nodes >= threshold")
@@ -588,7 +587,8 @@ def validate_quorum_safety(
 
     # Perform actual quorum check
     if not check_quorum_safety(options, total_nodes_to_fence):
-        logger.error("Quorum safety check FAILED - aborting")
+        logger.warning("Quorum safety check FAILED - peer fencing would cause loss of quorum")
+        logger.warning("Skipping peer node fencing, target will still be fenced")
         return False
 
     logger.info("Quorum safety check PASSED")
@@ -675,7 +675,7 @@ def set_terminate_attributes(
         logger.info("Peer nodes set terminate - target %s will be fenced by next device",
                     target_node)
     else:
-        logger.info("No peer nodes on site - target %s will be fenced by next device",
+        logger.info("No peer nodes triggered - target %s will be fenced by next device",
                     target_node)
 
     return failed_count == 0
@@ -757,7 +757,9 @@ def execute_site_fence(
 
     # Quorum safety check
     if not validate_quorum_safety(options, nodes_to_fence, quorum_safe):
-        return False
+        # Clear peer nodes but continue - target will still be fenced by fence_aws
+        logger.info("Target %s will be fenced by next device in topology", target_node)
+        nodes_to_fence = []
 
     # Set terminate attributes
     result = set_terminate_attributes(options, target_node, nodes_to_fence, force_reschedule)
