@@ -372,19 +372,18 @@ def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
     return nodes
 
 
-def get_quorum_status(options: Dict[str, str]) -> Tuple[int, bool]:
-    """Get quorum status.
+def get_quorum_status(options: Dict[str, str]) -> int:
+    """Get quorum expected votes.
 
     Args:
         options: Options dictionary from fence agent
 
     Returns:
-        Expected votes (0 if unavailable) and quorate status
+        Expected votes (0 if unavailable)
     """
     (rc, stdout, stderr) = run_cmd(options, "corosync-quorumtool -s")
 
     expected_votes = 0
-    quorate = False
 
     for line in stdout.strip().split('\n'):
         if "Expected votes" in line:
@@ -393,14 +392,11 @@ def get_quorum_status(options: Dict[str, str]) -> Tuple[int, bool]:
                 try:
                     expected_votes = int(parts[-1])
                 except ValueError as e:
-                    logger.debug("Failed to parse expected_votes from '%s': %s", parts[-1], e)
-        elif "Quorate" in line:
-            parts = line.split()
-            if parts and parts[-1].lower() in ["yes", "1"]:
-                quorate = True
+                    logger.debug("Failed to parse expected_votes from '%s': %s",
+                                 parts[-1], e)
 
-    logger.debug("Quorum: expected_votes=%d quorate=%s", expected_votes, quorate)
-    return expected_votes, quorate
+    logger.debug("Quorum: expected_votes=%d", expected_votes)
+    return expected_votes
 
 
 def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> bool:
@@ -413,7 +409,7 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
     Returns:
         True if safe, False if would lose quorum
     """
-    expected_votes, quorate = get_quorum_status(options)
+    expected_votes = get_quorum_status(options)
 
     if expected_votes == 0:
         logger.info("Unable to determine quorum status, proceeding with caution")
@@ -457,12 +453,15 @@ def site_fence_test(_conn, options):
 
     # Handle "on" action - just clear terminate attribute, no validation needed
     if action == "on":
-        logger.info("Target %s: Unfencing node - clearing terminate attribute", target_node)
+        logger.info("Target %s: Unfencing node - clearing terminate attribute",
+                    target_node)
         if clear_terminate(options, target_node):
-            logger.info("Target %s: Successfully cleared terminate attribute", target_node)
+            logger.info("Target %s: Successfully cleared terminate attribute",
+                        target_node)
             return True
         else:
-            logger.error("Target %s: Failed to clear terminate attribute", target_node)
+            logger.error("Target %s: Failed to clear terminate attribute",
+                         target_node)
             return False
 
     # Verify target node is a cluster member (for off/reboot actions)
@@ -516,8 +515,9 @@ def identify_nodes_to_fence(
 ) -> list:
     """Identify nodes eligible for fencing.
 
-    NOTE: This function identifies PEER nodes only. The target node is always
-    processed separately and is NOT subject to uptime threshold checks.
+    NOTE: This function identifies peer nodes on the same site as the target
+    node. The target node is always processed separately and is NOT subject
+    to uptime threshold checks.
 
     Args:
         options: Options dictionary from fence agent
@@ -538,7 +538,8 @@ def identify_nodes_to_fence(
         # Skip the target node - it will be fenced by the real fence device
         # Target node is always processed later without uptime checks
         if node == target_node:
-            logger.debug("Target %s: Node is the target, skipping from peer evaluation", target_node)
+            logger.debug("Target %s: Node is the target, "
+                         "skipping from peer evaluation", target_node)
             continue
 
         if node_site != target_site:
@@ -553,15 +554,18 @@ def identify_nodes_to_fence(
         # Target node will be fenced regardless of uptime
         node_uptime = get_node_uptime(options, node)
         if node_uptime is None:
-            logger.info("Peer node %s: uptime unavailable, skipping for safety", node)
+            logger.info("Peer node %s: uptime unavailable, skipping for safety",
+                        node)
             continue
 
         if node_uptime < uptime_threshold:
-            logger.info("Target %s: Peer node %s uptime %ds < threshold %ds, skipping",
+            logger.info("Target %s: Peer node %s uptime %ds < threshold %ds, "
+                        "skipping",
                         target_node, node, node_uptime, uptime_threshold)
             continue
 
-        logger.info("Target %s: Peer node %s uptime %ds >= threshold %ds, eligible for fencing",
+        logger.info("Target %s: Peer node %s uptime %ds >= threshold %ds, "
+                    "eligible for fencing",
                     target_node, node, node_uptime, uptime_threshold)
 
         nodes_to_fence.append(node)
@@ -883,13 +887,15 @@ def main():
 
     options = check_input(device_opt, process_input(device_opt))
 
-    # Configure logging: remove fencing library's stderr handlers, use syslog + stdout
+    # Configure logging: remove fencing library's stderr handlers and use
+    #  syslog + stdout
     # This prevents duplicates and logs at proper levels (not as warnings)
     logger.handlers.clear()
     logger.propagate = False
 
     # Set log level based on -v flag
-    log_level = logging.DEBUG if options.get("-v") or options.get("--verbose") else logging.INFO
+    verbose = options.get("-v") or options.get("--verbose")
+    log_level = logging.DEBUG if verbose else logging.INFO
     logger.setLevel(log_level)
 
     # Add syslog handler for /var/log/messages
