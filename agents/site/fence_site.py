@@ -800,7 +800,7 @@ def define_new_opts():
             "--site-attribute=[name]        "
             "Name of cluster attribute defining site membership"
         ),
-        "shortdesc": "Site attribute name",
+        "shortdesc": "Name of cluster attribute defining site membership",
         "required": "0",
         "default": "site",
         "order": 1
@@ -812,7 +812,7 @@ def define_new_opts():
             "--uptime-threshold=[seconds]   "
             "Minimum uptime before peer node can be fenced"
         ),
-        "shortdesc": "Minimum peer uptime in seconds",
+        "shortdesc": "Minimum uptime before peer node can be fenced",
         "required": "0",
         "default": "900",
         "order": 2
@@ -822,9 +822,9 @@ def define_new_opts():
         "longopt": "quorum-safe",
         "help": (
             "--quorum-safe=[true|false]     "
-            "Abort fencing if it would cause loss of quorum"
+            "Prevent site peer fencing if it would cause loss of quorum"
         ),
-        "shortdesc": "Quorum safety check",
+        "shortdesc": "Prevent site peer fencing if it would cause loss of quorum",
         "required": "0",
         "default": "true",
         "order": 4
@@ -833,10 +833,12 @@ def define_new_opts():
         "getopt": ":",
         "longopt": "force-reschedule",
         "help": (
-            "--force-reschedule=[true|false]  Enable parallel fencing mode "
-            "(fail target when peers need fencing)"
+            "--force-reschedule=[true|false]  Force parallel fencing - "
+            "fail target once when peers need fencing and reschedule all "
+            "fencing operations together"
         ),
-        "shortdesc": "Enable parallel fencing",
+        "shortdesc": "Force parallel fencing - fail target once when peers "
+                     "need fencing and reschedule all fencing operations together",
         "required": "0",
         "default": "false",
         "order": 5
@@ -846,9 +848,9 @@ def define_new_opts():
         "longopt": "dry-run",
         "help": (
             "--dry-run=[true|false]         "
-            "Log actions without executing (testing only)"
+            "Dry-run mode - log actions without executing (testing only)"
         ),
-        "shortdesc": "Dry-run mode",
+        "shortdesc": "Dry-run mode - log actions without executing (testing only)",
         "required": "0",
         "default": "false",
         "order": 6
@@ -902,38 +904,48 @@ def main():
 
     docs = {}
     docs["shortdesc"] = "Fence agent for synchronous site-wide fencing"
-    docs["longdesc"] = """fence_site is a fence agent for synchronous site-wide fencing in Pacemaker clusters.
-When a node is fenced, this agent identifies and sets terminate attributes for OTHER nodes on the same site,
-enabling parallel site-wide fencing. The target node itself is fenced by the real fence device.
+    docs["longdesc"] = """
+fence_site is a fence agent for synchronous site-wide fencing in Pacemaker
+clusters to allow a site isolation and faster recovery on the remaining nodes.
+When a node is fenced, this agent identifies and sets terminate attributes for
+other nodes on the same site, enabling parallel site-wide fencing.
+The actual fencing of any affected node is done by the real fence device.
 
-IMPORTANT: This agent must be listed BEFORE the real fence device in fencing topology to ensure
-terminate attributes are set while the real fence operation executes:
+IMPORTANT: This agent must be listed BEFORE the real fence device in a fencing
+topology to ensure terminate attributes are set on affected nodes.
 
-  pcs stonith level add 1 NODE fence-site REAL-FENCE-DEVICE
+Fencing topology setup example:
 
-The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps for uptime tracking.
+  # pcs stonith level add 1 NODE fence_site REAL_FENCE_DEVICE
+
+The agent uses Pacemaker Feature Set 3.18.0+ in_ccm timestamps for uptime
+tracking of peer nodes.
 
 Actions:
-- OFF/REBOOT: Sets terminate attribute for OTHER nodes on same site (NOT the target node)
-- ON: Deletes terminate attribute for the target node (unfencing/cleanup)
-- STATUS: Checks if all online nodes on site have terminate=true
+- OFF/REBOOT: Sets terminate attribute for all nodes on affected site
+- ON: Deletes terminate attribute for the starting node (unfencing/cleanup)
 
 Behavior:
-- Target node is fenced by the next device in topology (the real fence device)
-- Returns OFF (failure) when site-attribute is missing -> next device handles single-node fencing
-- Returns OFF (failure) when uptime data unavailable -> next device handles single-node fencing
-- Returns OFF (failure) when target node uptime is lower than threshold -> prevents loop after restart
-- Returns success when terminate attributes are set for site nodes
-
-Status checking:
-- Only online nodes require terminate=true for status to report "off" (fenced)
-- Offline/crashed nodes are ignored in status check (already down)
+- Target node is always processed, like in any serial fencing setup
+- Actual fencing is done by next device in topology (the real fence device)
+- Peer nodes on the same site are matched by a defined node attribute
+  - Nodes without the attribute or with a different value are excluded
+- Target node fencing completes first before peer nodes are fenced in
+  a batch (default, only the peers are fenced simultaneously)
+  - Fencing all nodes (target + peers) simultaneously can be enforced with a
+    parameter -> the initial fencing operation gets failed and pacemaker
+    reschedules all nodes fencing in the same operation.
+    Full parallel fencing requires the following extra settings:
+      - 'pcmk_off_retries=0' in the fence_site device
+      - 'pcmk_action_limit=-1' in all fence devices that handle more than one
+        node
 
 Safety features:
-- Uptime threshold: Only fence nodes that have been up for minimum duration (default 5 minutes)
-- Quorum protection: Abort fencing if it would cause loss of cluster quorum (includes target + site nodes)
-- Site isolation: Only fence nodes matching the target node's site attribute
-- Command injection protection: All parameters are properly escaped"""
+- Uptime threshold: Only fence peer nodes that have been online in the cluster
+  for minimum duration (default 15 minutes)
+- Quorum protection: Only fence peer nodes if the total number of nodes to be
+  fenced does not cause a quorum loss (default, safety check can be disabled)
+"""
     docs["vendorurl"] = "https://github.com/ClusterLabs"
 
     show_docs(options, docs)
