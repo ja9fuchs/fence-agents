@@ -4,6 +4,9 @@
 #
 # When a node is fenced, this agent identifies and fences all other nodes
 # with the same site attribute, enabling parallel site-wide fencing.
+#
+# IMPORTANT: The uptime threshold check ONLY applies to peer nodes.
+# The target node is always fenced regardless of uptime.
 
 import atexit
 import logging
@@ -513,45 +516,50 @@ def identify_nodes_to_fence(
 ) -> list:
     """Identify peer nodes eligible for fencing.
 
+    NOTE: This function identifies PEER nodes only. The target node is always
+    processed separately and is NOT subject to uptime threshold checks.
+
     Args:
         options: Options dictionary from fence agent
         target_node: Node being fenced (excluded from peers)
         target_site: Site value of target node
         node_sites: Mapping of node names to site values
-        uptime_threshold: Minimum uptime in seconds
+        uptime_threshold: Minimum uptime in seconds for PEER nodes
 
     Returns:
-        Node names eligible for fencing (empty if none)
+        List of peer node names eligible for fencing (empty if none)
     """
     nodes_to_fence = []
-    logger.info("Identifying nodes to fence")
+    logger.info("Identifying peer nodes to fence")
 
     for node, node_site in node_sites.items():
         logger.debug("Checking node: %s", node)
 
         # Skip the target node - it will be fenced by the real fence device
+        # Target node is always processed later without uptime checks
         if node == target_node:
-            logger.debug("Node %s is the target, skipping terminate attribute", node)
+            logger.debug("Node %s is the target, skipping from peer evaluation", node)
             continue
 
         if node_site != target_site:
             logger.debug("Node %s on different site (%s), skipping", node, node_site)
             continue
 
-        logger.info("Node %s is on same site as target (%s)", node, target_site)
+        logger.info("Peer node %s is on same site as target (%s)", node, target_site)
 
-        # Check uptime threshold
+        # Check uptime threshold (applies to peer nodes only)
+        # Target node will be fenced regardless of uptime
         node_uptime = get_node_uptime(options, node)
         if node_uptime is None:
-            logger.info("Node %s: uptime unavailable, skipping for safety", node)
+            logger.info("Peer node %s: uptime unavailable, skipping for safety", node)
             continue
 
         if node_uptime < uptime_threshold:
-            logger.info("Node %s: uptime %ds < threshold %ds, skipping",
+            logger.info("Peer node %s: uptime %ds < threshold %ds, skipping",
                         node, node_uptime, uptime_threshold)
             continue
 
-        logger.info("Node %s: uptime %ds >= threshold %ds, eligible for fencing",
+        logger.info("Peer node %s: uptime %ds >= threshold %ds, eligible for fencing",
                     node, node_uptime, uptime_threshold)
 
         nodes_to_fence.append(node)
@@ -603,10 +611,13 @@ def set_terminate_attributes(
 ) -> bool:
     """Set terminate attributes and determine return value.
 
+    NOTE: Target node is ALWAYS processed here, regardless of uptime.
+    Only peer nodes (in nodes_to_fence) have been filtered by uptime threshold.
+
     Args:
         options: Options dictionary from fence agent
-        target_node: Node being fenced
-        nodes_to_fence: List of peer nodes to fence
+        target_node: Node being fenced (always processed)
+        nodes_to_fence: List of peer nodes to fence (already filtered by uptime)
         force_reschedule: Whether to fail and force reschedule with peers
 
     Returns:
@@ -624,7 +635,7 @@ def set_terminate_attributes(
     failed_nodes = []
     peer_terminate_new = 0  # Track if any peer nodes get terminate set
 
-    # Set terminate for target node
+    # Set terminate for target node (always processed, no uptime check)
     # Update target node before peers to prevent the peer terminate from
     # scheduling before the target node processing returned
     current_terminate = get_terminate_from_node_state(node_states.get(target_node))
@@ -632,7 +643,7 @@ def set_terminate_attributes(
         logger.info("Target node %s already has terminate=true, skipping", target_node)
         already_set += 1
     else:
-        logger.info("Setting terminate for target node: %s", target_node)
+        logger.info("Setting terminate for target node %s (no uptime check)", target_node)
         if set_terminate(options, target_node):
             newly_set += 1
         else:
@@ -692,16 +703,19 @@ def execute_site_fence(
     """Execute site-wide fencing.
 
     Orchestrates the following:
-    - Identify peer nodes eligible for fencing
+    - Identify peer nodes eligible for fencing (with uptime filtering)
     - Validate quorum safety
-    - Set terminate attributes
+    - Set terminate attributes (target always processed, peers already filtered)
     - Handle single node mode when applicable
+
+    NOTE: The uptime threshold ONLY applies to peer nodes. The target node
+    is always processed regardless of uptime.
 
     Args:
         options: Options dictionary from fence agent
-        target_node: Node being fenced
+        target_node: Node being fenced (always processed)
         site_attribute: Name of the site attribute
-        uptime_threshold: Minimum uptime in seconds
+        uptime_threshold: Minimum uptime in seconds (for peer nodes only)
         quorum_safe: Whether to enforce quorum check
         force_reschedule: Whether to fail when peers need fencing
 
@@ -709,7 +723,7 @@ def execute_site_fence(
         True on success, False on failure
     """
     logger.info("Starting site-wide fencing for target: %s", target_node)
-    logger.info("Site attribute: %s, uptime threshold: %ds, force parallel: %s",
+    logger.info("Site attribute: %s, peer uptime threshold: %ds, force parallel: %s",
                 site_attribute, uptime_threshold, force_reschedule)
 
     # Query all node states once
@@ -728,36 +742,23 @@ def execute_site_fence(
 
     logger.info("Target node %s is on site: %s", target_node, target_site)
 
-    # Check target node uptime availability
-    target_uptime = get_node_uptime(options, target_node)
-    if target_uptime is None:
-        logger.warning("Uptime unavailable for target node: %s, cannot verify threshold",
-                       target_node)
-        logger.info("Proceeding with peer fencing (uptime check will be applied to peers)")
-    elif target_uptime < uptime_threshold:
-        logger.info("Target node %s uptime %ds < threshold %ds",
-                    target_node, target_uptime, uptime_threshold)
-        logger.info("Node recently restarted - skipping site-wide fencing")
-        logger.info("Target %s will be fenced by next device in topology", target_node)
-        return True
-    else:
-        logger.debug("Target node %s uptime: %ds", target_node, target_uptime)
-
-    # Identify nodes to fence
+    # Identify peer nodes to fence (applies uptime threshold to peers only)
+    # Target node will be processed separately without uptime checks
     nodes_to_fence = identify_nodes_to_fence(
         options, target_node, target_site, node_sites,
         uptime_threshold
     )
 
     # If no peer nodes need fencing, return success immediately
+    # Target node will still be fenced by the next fence device
     if not nodes_to_fence:
-        logger.info("No peer nodes require fencing - returning success")
         logger.info("Target %s will be fenced by next device in topology", target_node)
         return True
 
     # Quorum safety check
     if not validate_quorum_safety(options, nodes_to_fence, quorum_safe):
-        # Clear peer nodes but continue - target will still be fenced by fence_aws
+        # Clear peer nodes but continue - target will still be fenced by the
+        # next fence device
         logger.info("Target %s will be fenced by next device in topology", target_node)
         nodes_to_fence = []
 
@@ -793,9 +794,9 @@ def define_new_opts():
         "longopt": "uptime-threshold",
         "help": (
             "--uptime-threshold=[seconds]   "
-            "Minimum uptime before node can be fenced"
+            "Minimum uptime before peer node can be fenced"
         ),
-        "shortdesc": "Minimum uptime in seconds",
+        "shortdesc": "Minimum peer uptime in seconds",
         "required": "0",
         "default": "900",
         "order": 2
