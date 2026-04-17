@@ -430,6 +430,116 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
     return True
 
 
+def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
+    """Validate fence_site is correctly configured in fencing topology.
+
+    fence_site MUST be configured at the same level as a real fence device
+    and MUST NOT be the last device in the level.
+
+    If fence_site is alone on a level, or is the last device, fencing will
+    fail because no real fence device will execute after fence_site sets
+    the terminate attributes.
+
+    Args:
+        options: Options dictionary from fence agent
+        target_node: Node being fenced (for logging only)
+
+    Returns:
+        True if topology is valid, False if misconfigured
+    """
+    (rc, stdout, stderr) = run_cmd(
+        options,
+        "cibadmin --query --xpath "
+        "'/cib/configuration/fencing-topology/fencing-level'"
+    )
+
+    # Fail if the topology cannot be determined
+    if rc != 0:
+        logger.error("Target %s: Could not query fencing topology",
+                     target_node)
+        return False
+
+    # Parse XML to find fencing levels
+    try:
+        root = ET.fromstring(stdout)
+    except ET.ParseError as e:
+        logger.error("Target %s: Failed to parse fencing topology: %s",
+                     target_node, e)
+        return False
+
+    # Handle both single element and multiple elements
+    if root.tag == "fencing-level":
+        levels = [root]
+    else:
+        levels = root.findall(".//fencing-level")
+
+    # Find ANY level containing fence_site
+    # (if fence_site is running, it must be configured somewhere)
+    fence_site_level = None
+    fence_site_devices = None
+
+    for level in levels:
+        devices_str = level.get("devices", "")
+        devices = [d.strip() for d in devices_str.split(",")]
+
+        if "fence_site" in devices:
+            fence_site_level = level.get("index")
+            fence_site_devices = devices
+            break
+
+    # If not found in topology, allow (for manual testing)
+    if not fence_site_level or not fence_site_devices:
+        logger.warning("Target %s: fence_site not found in topology",
+                       target_node)
+        return True
+
+    # Check if fence_site is the only device in the entire topology
+    # Collect all unique devices across all levels
+    all_devices = set()
+    for level in levels:
+        devices_str = level.get("devices", "")
+        devices = [d.strip() for d in devices_str.split(",") if d.strip()]
+        all_devices.update(devices)
+
+    if all_devices == {"fence_site"}:
+        logger.error("Target %s: fence_site is the ONLY device in topology",
+                     target_node)
+        logger.error("Target %s: At least one real fence device MUST be "
+                     "configured on the same level after fence_site!",
+                     target_node)
+        return False
+
+    # Check if fence_site is alone on this level
+    if len(fence_site_devices) == 1:
+        logger.error("Target %s: fence_site is ALONE at topology level %s",
+                     target_node, fence_site_level)
+        logger.error("Target %s: fence_site MUST be configured with a real "
+                     "fence device", target_node)
+        logger.error("Target %s: Current devices at level %s: %s",
+                     target_node, fence_site_level,
+                     ", ".join(fence_site_devices))
+        return False
+
+    # Check if fence_site is the first device in the level
+    # fence_site MUST be first to set terminate attributes before real device
+    fence_site_index = fence_site_devices.index("fence_site")
+    if fence_site_index != 0:
+        logger.error("Target %s: fence_site is NOT first device at level %s",
+                     target_node, fence_site_level)
+        logger.error("Target %s: fence_site MUST be the first device",
+                     target_node)
+        logger.error("Target %s: Current device order: %s",
+                     target_node, " -> ".join(fence_site_devices))
+        return False
+
+    # Valid configuration
+    logger.info("Target %s: Topology validation passed - level %s has %d devices",
+                target_node, fence_site_level, len(fence_site_devices))
+    logger.info("Target %s: fence_site is first device: %s",
+                target_node, " -> ".join(fence_site_devices))
+    return True
+
+
 def site_fence_test(_conn, options):
     """Main fence logic for site-wide fencing.
 
@@ -470,6 +580,12 @@ def site_fence_test(_conn, options):
         logger.error("Target node '%s' is not a cluster member", target_node)
         logger.error("Known cluster nodes: %s", ", ".join(cluster_nodes.keys()))
         fail(EC_STATUS)
+
+    # Validate fencing topology configuration
+    if not validate_topology_config(options, target_node):
+        logger.error("Target %s: Invalid fencing topology configuration",
+                     target_node)
+        return False
 
     site_attribute = options.get("--site-attribute")
 
@@ -951,6 +1067,8 @@ Safety features:
   for minimum duration (default 15 minutes)
 - Quorum protection: Only fence peer nodes if the total number of nodes to be
   fenced does not cause a quorum loss (default, safety check can be disabled)
+- Topology validation: Fail if fence_site is the only device on the topology
+  level, or if it is not the first device in the list
 """
     docs["vendorurl"] = "https://github.com/ClusterLabs"
 
