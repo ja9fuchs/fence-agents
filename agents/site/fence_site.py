@@ -370,6 +370,7 @@ def get_quorum_status(options: Dict[str, str]) -> int:
             if parts:
                 try:
                     expected_votes = int(parts[-1])
+                    break
                 except ValueError as e:
                     logger.debug("Failed to parse expected_votes from '%s': %s",
                                  parts[-1], e)
@@ -619,19 +620,14 @@ def site_fence_test(_conn, options):
         logger.warning("Invalid uptime threshold %d, using 0", uptime_threshold)
         uptime_threshold = 0
 
-    # For off/reboot actions
-    if action in ["off", "reboot"]:
-        return execute_site_fence(
-            options,
-            target_node,
-            site_attribute,
-            uptime_threshold,
-            quorum_safe,
-            force_reschedule
-        )
-
-    logger.warning("Action %s not handled", action)
-    return False
+    return execute_site_fence(
+        options,
+        target_node,
+        site_attribute,
+        uptime_threshold,
+        quorum_safe,
+        force_reschedule
+    )
 
 
 def identify_nodes_to_fence(
