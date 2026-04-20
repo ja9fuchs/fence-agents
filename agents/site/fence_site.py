@@ -482,36 +482,25 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
     else:
         levels = root.findall(".//fencing-level")
 
-    # Find the level that applies to target node and contains fence_site
-    fence_site_level = None
+    # Single pass: find fence_site's level AND collect all devices
     fence_site_devices = None
+    fence_site_level = None
+    all_devices = set()
 
     for level in levels:
-        # Only check levels that apply to this target node
-        if not matches_target(level, target_node):
-            continue
+        devices = [d.strip() for d in level.get("devices", "").split(",") if d.strip()]
+        all_devices.update(devices)
 
-        devices_str = level.get("devices", "")
-        devices = [d.strip() for d in devices_str.split(",")]
-
-        if "fence_site" in devices:
-            fence_site_level = level.get("index")
-            fence_site_devices = devices
-            break
+        if fence_site_devices is None and matches_target(level, target_node):
+            if "fence_site" in devices:
+                fence_site_level = level.get("index")
+                fence_site_devices = devices
 
     # If not found in topology, allow (for manual testing)
-    if not fence_site_level or not fence_site_devices:
+    if not fence_site_devices:
         logger.warning("Target %s: fence_site not found in topology for this node",
                        target_node)
         return True
-
-    # Check if fence_site is the only device in the entire topology
-    # Collect all unique devices across all levels
-    all_devices = set()
-    for level in levels:
-        devices_str = level.get("devices", "")
-        devices = [d.strip() for d in devices_str.split(",") if d.strip()]
-        all_devices.update(devices)
 
     if all_devices == {"fence_site"}:
         logger.error("Target %s: fence_site is the ONLY device in topology",
@@ -532,10 +521,8 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
                      ", ".join(fence_site_devices))
         return False
 
-    # Check if fence_site is the first device in the level
     # fence_site MUST be first to set terminate attributes before real device
-    fence_site_index = fence_site_devices.index("fence_site")
-    if fence_site_index != 0:
+    if fence_site_devices[0] != "fence_site":
         logger.error("Target %s: fence_site is NOT first device at level %s",
                      target_node, fence_site_level)
         logger.error("Target %s: fence_site MUST be the first device",
