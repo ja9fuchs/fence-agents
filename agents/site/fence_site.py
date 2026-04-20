@@ -294,14 +294,10 @@ def is_terminate_set(node_state: Optional[ET.Element]) -> bool:
     return value is not None and value.lower() in ["true", "1"]
 
 
-def get_node_uptime(
-    options: Dict[str, str],
-    node: str
-) -> Optional[int]:
+def get_node_uptime(node: str) -> Optional[int]:
     """Get node uptime in seconds from in_ccm timestamp.
 
     Args:
-        options: Options dictionary from fence agent
         node: Node name to check
 
     Returns:
@@ -679,7 +675,7 @@ def identify_nodes_to_fence(
 
         # Check uptime threshold (applies to peer nodes only)
         # Target node will be fenced regardless of uptime
-        node_uptime = get_node_uptime(options, node)
+        node_uptime = get_node_uptime(node)
         if node_uptime is None:
             logger.info("Peer node %s: uptime unavailable, skipping for safety",
                         node)
