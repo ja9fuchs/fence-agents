@@ -309,8 +309,12 @@ def get_node_uptime(node: str) -> Optional[int]:
         in_ccm = node_state.get('in_ccm')
         if in_ccm and in_ccm not in ["0", "false"]:
             try:
-                current_time = int(time.time())
-                uptime = current_time - int(in_ccm)
+                uptime = int(time.time()) - int(in_ccm)
+                if uptime < 0:
+                    logger.warning("Peer node %s has negative uptime %ds "
+                                   "(clock skew?), treating as unavailable",
+                                   node, uptime)
+                    return None
                 logger.debug("Peer node %s uptime from in_ccm: %ds", node, uptime)
                 return uptime
             except ValueError:
