@@ -10,6 +10,7 @@
 
 import atexit
 import logging
+import re
 import shlex
 import sys
 import time
@@ -430,15 +431,45 @@ def check_quorum_safety(options: Dict[str, str], nodes_to_fence_count: int) -> b
     return True
 
 
+def matches_target(level: ET.Element, target_node: str) -> bool:
+    """Check if fencing level applies to target node.
+
+    Supports both exact match (target attribute) and regex match
+    (target-pattern attribute).
+
+    Args:
+        level: XML Element for fencing-level
+        target_node: Node name to check
+
+    Returns:
+        True if level applies to this node, False otherwise
+    """
+    # Check exact match via "target" attribute
+    target = level.get("target")
+    if target and target == target_node:
+        return True
+
+    # Check regex match via "target-pattern" attribute
+    target_pattern = level.get("target-pattern")
+    if target_pattern:
+        try:
+            if re.match(target_pattern, target_node):
+                return True
+        except re.error as e:
+            logger.warning("Invalid target-pattern regex '%s': %s",
+                           target_pattern, e)
+
+    return False
+
+
 def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
     """Validate fence_site is correctly configured in fencing topology.
 
     fence_site MUST be configured at the same level as a real fence device
     and MUST NOT be the last device in the level.
 
-    If fence_site is alone on a level, or is the last device, fencing will
-    fail because no real fence device will execute after fence_site sets
-    the terminate attributes.
+    Fail if fence_site is alone or is the last device on a level that matches
+    the target node.
 
     Args:
         options: Options dictionary from fence agent
@@ -473,12 +504,15 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
     else:
         levels = root.findall(".//fencing-level")
 
-    # Find ANY level containing fence_site
-    # (if fence_site is running, it must be configured somewhere)
+    # Find the level that applies to target node and contains fence_site
     fence_site_level = None
     fence_site_devices = None
 
     for level in levels:
+        # Only check levels that apply to this target node
+        if not matches_target(level, target_node):
+            continue
+
         devices_str = level.get("devices", "")
         devices = [d.strip() for d in devices_str.split(",")]
 
@@ -489,7 +523,7 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
 
     # If not found in topology, allow (for manual testing)
     if not fence_site_level or not fence_site_devices:
-        logger.warning("Target %s: fence_site not found in topology",
+        logger.warning("Target %s: fence_site not found in topology for this node",
                        target_node)
         return True
 
@@ -903,6 +937,9 @@ def execute_site_fence(
 
     if is_dry_run(options):
         logger.info("DRY-RUN: Would return %s", "SUCCESS" if result else "FAILURE")
+        logger.info("DRY-RUN: Returning FAILURE to prevent triggering next device "
+                    "on same topology level")
+        return False
 
     return result
 
