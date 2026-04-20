@@ -15,7 +15,7 @@ import shlex
 import sys
 import time
 import xml.etree.ElementTree as ET
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Tuple
 
 sys.path.append("/usr/share/fence")
 from fencing import (  # noqa: E402
@@ -98,23 +98,6 @@ def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element
                          context, len(xml_string))
         return None
 
-
-def get_all_online_nodes(options: Dict[str, str]) -> Set[str]:
-    """Get list of all online nodes from cached cluster nodes.
-
-    Args:
-        options: Options dictionary from fence agent
-
-    Returns:
-        Set of online node names (nodes with "member" status)
-    """
-    cluster_nodes = get_all_cluster_nodes(options)
-
-    # Filter for nodes with "member" status
-    online_nodes = {node for node, status in cluster_nodes.items() if status == "member"}
-
-    logger.debug("Online nodes: %s", ', '.join(sorted(online_nodes)))
-    return online_nodes
 
 
 def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str, str]:
