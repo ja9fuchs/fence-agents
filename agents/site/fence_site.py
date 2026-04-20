@@ -687,23 +687,24 @@ def validate_quorum_safety(
     Returns:
         True if safe to proceed, False if would lose quorum
     """
+    # Pass immediately if check is disabled
+    if not quorum_safe:
+        logger.info("Target %s: Quorum safety check DISABLED by configuration",
+                    target_node)
+        return True
+
     # Include target node in count (it will be fenced by real device,
     # not by terminate attribute)
     total_nodes_to_fence = len(nodes_to_fence) + 1  # +1 for target node
     logger.info("Target %s: Quorum safety check for %d nodes (target + %d peers)",
                 target_node, total_nodes_to_fence, len(nodes_to_fence))
 
-    if not quorum_safe:
-        logger.info("Target %s: Quorum safety check DISABLED by configuration",
-                    target_node)
-        return True
-
     # Perform actual quorum check
     if not check_quorum_safety(options, total_nodes_to_fence):
         logger.warning("Target %s: Quorum safety check FAILED - "
                        "peer fencing would cause loss of quorum", target_node)
         logger.warning("Target %s: Skipping peer node fencing,"
-                       "target will still be fenced", target_node)
+                       " target will still be fenced", target_node)
         return False
 
     logger.info("Target %s: Quorum safety check PASSED", target_node)
@@ -752,7 +753,7 @@ def set_terminate_attributes(
                     target_node)
         already_set += 1
     else:
-        logger.info("Target %s: Setting terminate for target node", target_node)
+        logger.debug("Target %s: Setting terminate for target node", target_node)
         if set_terminate(options, target_node):
             newly_set += 1
         else:
@@ -766,8 +767,8 @@ def set_terminate_attributes(
                         target_node, node)
             already_set += 1
         else:
-            logger.info("Target %s: Setting terminate for peer node %s",
-                        target_node, node)
+            logger.debug("Target %s: Setting terminate for peer node %s",
+                         target_node, node)
             if set_terminate(options, node):
                 newly_set += 1
                 peer_terminate_new += 1
