@@ -99,7 +99,6 @@ def safe_parse_xml(xml_string: str, context: str = "XML") -> Optional[ET.Element
         return None
 
 
-
 def get_all_node_sites(options: Dict[str, str], site_attribute: str) -> Dict[str, str]:
     """Get site attribute for all nodes.
 
@@ -435,10 +434,11 @@ def matches_target(level: ET.Element, target_node: str) -> bool:
         return True
 
     # Check regex match via "target-pattern" attribute
+    # Uses re.search to match Pacemaker's regexec() semantics (substring match)
     target_pattern = level.get("target-pattern")
     if target_pattern:
         try:
-            if re.match(target_pattern, target_node):
+            if re.search(target_pattern, target_node):
                 return True
         except re.error as e:
             logger.warning("Invalid target-pattern regex '%s': %s",
@@ -537,9 +537,9 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
 
     # Valid configuration
     logger.debug("Target %s: Topology validation passed - level %s has %d devices",
-                target_node, fence_site_level, len(fence_site_devices))
+                 target_node, fence_site_level, len(fence_site_devices))
     logger.debug("Target %s: fence_site is first device: %s",
-                target_node, " -> ".join(fence_site_devices))
+                 target_node, " -> ".join(fence_site_devices))
     return True
 
 
