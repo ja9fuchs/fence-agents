@@ -470,11 +470,8 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
         return False
 
     # Parse XML to find fencing levels
-    try:
-        root = ET.fromstring(stdout)
-    except ET.ParseError as e:
-        logger.error("Target %s: Failed to parse fencing topology: %s",
-                     target_node, e)
+    root = safe_parse_xml(stdout, "fencing topology")
+    if root is None:
         return False
 
     # Handle both single element and multiple elements
