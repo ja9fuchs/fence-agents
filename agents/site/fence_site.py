@@ -359,13 +359,8 @@ def get_all_cluster_nodes(options: Dict[str, str]) -> Dict[str, str]:
     nodes = {}
     for line in stdout.strip().split('\n'):
         parts = line.split()
-        if len(parts) >= 3:
-            node_name = parts[1]
-            status = parts[2]
-            nodes[node_name] = status
-        elif len(parts) >= 2:
-            # Fallback if no status
-            nodes[parts[1]] = "unknown"
+        if len(parts) >= 2:
+            nodes[parts[1]] = parts[2] if len(parts) >= 3 else "unknown"
 
     # DEBUG example: node1(member), node2(member), node3(lost)
     logger.debug("Cluster nodes: %s", ", ".join(f"{n}({s})" for n, s in nodes.items()))
