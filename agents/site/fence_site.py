@@ -532,9 +532,9 @@ def validate_topology_config(options: Dict[str, str], target_node: str) -> bool:
         return False
 
     # Valid configuration
-    logger.info("Target %s: Topology validation passed - level %s has %d devices",
+    logger.debug("Target %s: Topology validation passed - level %s has %d devices",
                 target_node, fence_site_level, len(fence_site_devices))
-    logger.info("Target %s: fence_site is first device: %s",
+    logger.debug("Target %s: fence_site is first device: %s",
                 target_node, " -> ".join(fence_site_devices))
     return True
 
@@ -643,44 +643,30 @@ def identify_nodes_to_fence(
     logger.info("Target %s: Identifying peer nodes to fence", target_node)
 
     for node, node_site in node_sites.items():
-        logger.debug("Target %s: Checking %s", target_node, node)
-
-        # Skip the target node - it will be fenced by the real fence device
-        # Target node is always processed later without uptime checks
         if node == target_node:
-            logger.debug("Target %s: Node is the target, "
-                         "skipping from peer evaluation", target_node)
             continue
 
         if node_site != target_site:
-            logger.debug("Target %s: Node %s on different site (%s), skipping",
+            logger.debug("Target %s: Peer %s on different site (%s), skipping",
                          target_node, node, node_site)
             continue
 
-        logger.info("Target %s: Peer node %s is on same site as target (%s)",
-                    target_node, node, target_site)
-
-        # Check uptime threshold (applies to peer nodes only)
-        # Target node will be fenced regardless of uptime
         node_uptime = get_node_uptime(node)
         if node_uptime is None:
-            logger.info("Peer node %s: uptime unavailable, skipping for safety",
-                        node)
+            logger.info("Target %s: Peer %s uptime unavailable, skipping",
+                        target_node, node)
             continue
 
         if node_uptime < uptime_threshold:
-            logger.info("Target %s: Peer node %s uptime %ds < threshold %ds, "
-                        "skipping",
+            logger.info("Target %s: Peer %s uptime %ds < threshold %ds, skipping",
                         target_node, node, node_uptime, uptime_threshold)
             continue
 
-        logger.info("Target %s: Peer node %s uptime %ds >= threshold %ds, "
-                    "eligible for fencing",
+        logger.info("Target %s: Peer %s eligible (uptime %ds >= %ds)",
                     target_node, node, node_uptime, uptime_threshold)
-
         nodes_to_fence.append(node)
 
-    logger.info("Target %s: %d peers are eligible for fencing",
+    logger.info("Target %s: %d peers eligible for fencing",
                 target_node, len(nodes_to_fence))
     return nodes_to_fence
 
