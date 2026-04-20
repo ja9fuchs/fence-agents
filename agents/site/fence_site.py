@@ -288,6 +288,12 @@ def get_terminate_from_node_state(node_state: Optional[ET.Element]) -> Optional[
     return None
 
 
+def is_terminate_set(node_state: Optional[ET.Element]) -> bool:
+    """Check if terminate attribute is already set to true."""
+    value = get_terminate_from_node_state(node_state)
+    return value is not None and value.lower() in ["true", "1"]
+
+
 def get_node_uptime(
     options: Dict[str, str],
     node: str
@@ -772,8 +778,7 @@ def set_terminate_attributes(
     # Set terminate for target node (always processed, no uptime check)
     # Update target node before peers to prevent the peer terminate from
     # scheduling before the target node processing returned
-    current_terminate = get_terminate_from_node_state(node_states.get(target_node))
-    if current_terminate and current_terminate.lower() in ["true", "1"]:
+    if is_terminate_set(node_states.get(target_node)):
         logger.info("Target %s: Target node already has terminate=true, skipping",
                     target_node)
         already_set += 1
@@ -787,8 +792,7 @@ def set_terminate_attributes(
 
     # Set terminate for peer nodes (after target node for scheduling timing)
     for node in nodes_to_fence:
-        current_terminate = get_terminate_from_node_state(node_states.get(node))
-        if current_terminate and current_terminate.lower() in ["true", "1"]:
+        if is_terminate_set(node_states.get(node)):
             logger.info("Target %s: Peer node %s already has terminate=true, skipping",
                         target_node, node)
             already_set += 1
