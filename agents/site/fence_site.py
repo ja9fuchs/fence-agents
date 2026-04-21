@@ -801,7 +801,7 @@ def set_terminate_attributes(
         logger.info("Target %s: Peer nodes set terminate - "
                     "target will be fenced by next device", target_node)
     else:
-        logger.info("Target %s: No peer nodes triggered - "
+        logger.info("Target %s: No new peer nodes triggered - "
                     "target will be fenced by next device", target_node)
 
     return failed_count == 0
