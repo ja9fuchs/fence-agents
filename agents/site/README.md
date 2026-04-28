@@ -339,6 +339,12 @@ fence_site --plug node1 --action off -v
 
 **Override**: Set `uptime_threshold=0` to fence all peers regardless of uptime.
 
+#### 1.1 in_ccm="true" Edge Case Handling
+
+**Problem**: Older Pacemaker versions may show `in_ccm="true"` instead of timestamp (CRM feature set <3.18.0).
+
+**Solution**: When `uptime_threshold=0`, skip uptime check entirely (processes these nodes). When `uptime_threshold>0`, treat as unavailable (skip these nodes).
+
 ### 2. Quorum Safety Check
 
 **Problem**: Fencing entire site could cause quorum loss.
@@ -360,7 +366,7 @@ fence_site --plug node1 --action off -v
 
 ### 3. Topology Validation
 
-**Problem**: Misconfigured topology can cause infinite loops or no fencing.
+**Problem**: Misconfigured topology can cause infinite loops or false fencing results that can lead to split brain situations.
 
 **Solution**: Validate fence_site is properly configured before running.
 
@@ -379,27 +385,6 @@ pcs stonith level add 1 node1 <real-fence-device> fence-site
 pcs stonith level add 1 node1 fence-site <real-fence-device>
 # fence_site sets terminate, THEN real device fences
 ```
-
-### 4. Target Scheduling Before Peers
-
-**Problem**: Cascading fence operations if peers process target as new peer.
-
-**Solution**: Target node gets `terminate=true` before peers, preventing cascade.
-
-```bash
-# Execution order when node1 fails:
-# 1. Set terminate=true on node1 (target)
-# 2. Set terminate=true on node2 (peer)
-# 3. Set terminate=true on node3 (peer)
-# Result: If node2/node3 process independently, they see node1 already marked
-# No cascade - node4, node5 (siteB) unaffected
-```
-
-### 5. in_ccm="true" Edge Case Handling
-
-**Problem**: Older Pacemaker versions may show `in_ccm="true"` instead of timestamp (CRM feature set <3.18.0).
-
-**Solution**: When `uptime_threshold=0`, skip uptime check entirely (processes these nodes). When `uptime_threshold>0`, treat as unavailable (skip these nodes).
 
 ---
 
