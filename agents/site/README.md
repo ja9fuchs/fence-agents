@@ -334,16 +334,16 @@ fence_site --plug node1 --action off -v
 #   - node2 uptime = 65min > 900s threshold ✓ eligible
 #   - node3 uptime = 5min < 900s threshold ✗ skipped
 # Result: node1 and node2 fenced, node3 NOT fenced (too new)
-# node3 remains online, can rejoin siteB cluster
+# node3 remains online
 ```
 
-**Override**: Set `uptime_threshold=0` to fence all peers regardless of uptime.
+**Override**: Set `uptime_threshold=0` to fence all peers regardless of uptime. Make sure to use the "off" action for fencing, instead of "reboot", to prevent possible reboot loops.
 
 #### 1.1 in_ccm="true" Edge Case Handling
 
 **Problem**: Older Pacemaker versions may show `in_ccm="true"` instead of timestamp (CRM feature set <3.18.0).
 
-**Solution**: When `uptime_threshold=0`, skip uptime check entirely (processes these nodes). When `uptime_threshold>0`, treat as unavailable (skip these nodes).
+**Solution**: When `uptime_threshold=0`, skip uptime check entirely (processes these nodes). Make sure to use the "off" action for fencing, instead of "reboot", to prevent possible reboot loops. When `uptime_threshold>0`, treat as unavailable (skip these nodes). 
 
 ### 2. Quorum Safety Check
 
