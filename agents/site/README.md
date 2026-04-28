@@ -534,7 +534,7 @@ pcs stonith update <real-fence-device> pcmk_action_limit=-1
 ```bash
 # Check Pacemaker feature set
 cibadmin --query | grep validate-with
-# Needs: pacemaker-3.18.0 or later for in_ccm timestamps
+# Needs: pacemaker-2.1.7 (CRM feature set 3.18.0) or later for in_ccm timestamps
 
 # Check node_state
 cibadmin --query --xpath "//node_state[@uname='node2']"
@@ -542,7 +542,7 @@ cibadmin --query --xpath "//node_state[@uname='node2']"
 ```
 
 **Solution**:
-- Upgrade to Pacemaker 2.1.7+ (Feature Set 3.18.0)
+- Upgrade to Pacemaker 2.1.7+ (CRM feature set 3.18.0)
 - OR set `uptime_threshold=0` to bypass uptime checks
 
 ### Debug Logging
