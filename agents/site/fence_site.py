@@ -655,6 +655,14 @@ def identify_nodes_to_fence(
                          target_node, node, node_site)
             continue
 
+        # Skip uptime check when threshold is 0
+        if uptime_threshold == 0:
+            logger.info("Target %s: Peer %s eligible (uptime check DISABLED)",
+                        target_node, node)
+            nodes_to_fence.append(node)
+            continue
+
+        # Normal uptime checking when threshold > 0
         node_uptime = get_node_uptime(node)
         if node_uptime is None:
             logger.info("Target %s: Peer %s uptime unavailable, skipping",
