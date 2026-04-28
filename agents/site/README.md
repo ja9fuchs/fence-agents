@@ -241,11 +241,11 @@ pcs stonith create fence-site fence_site \
     site_attribute=site
 
 # Configure topology
-pcs stonith level add 1 node1 fence-site fence-ipmilan-node1
-pcs stonith level add 1 node2 fence-site fence-ipmilan-node2
-pcs stonith level add 1 node3 fence-site fence-ipmilan-node3
-pcs stonith level add 1 node4 fence-site fence-ipmilan-node4
-pcs stonith level add 1 node5 fence-site fence-ipmilan-node5
+pcs stonith level add 1 node1 fence-site <real-fence-device>
+pcs stonith level add 1 node2 fence-site <real-fence-device>
+pcs stonith level add 1 node3 fence-site <real-fence-device>
+pcs stonith level add 1 node4 fence-site <real-fence-device>
+pcs stonith level add 1 node5 fence-site <real-fence-device>
 
 # Test manually (dry-run)
 fence_site --plug node1 --action off --dry-run -v
@@ -372,11 +372,11 @@ fence_site --plug node1 --action off -v
 **Example failure**:
 ```bash
 # BAD: fence_site after real device
-pcs stonith level add 1 node1 fence-ipmilan-node1 fence-site
+pcs stonith level add 1 node1 <real-fence-device> fence-site
 # fence_site runs AFTER fencing completes (useless)
 
 # GOOD: fence_site before real device  
-pcs stonith level add 1 node1 fence-site fence-ipmilan-node1
+pcs stonith level add 1 node1 fence-site <real-fence-device>
 # fence_site sets terminate, THEN real device fences
 ```
 
@@ -420,9 +420,9 @@ T+0s: node1 (siteA) fails
 T+1s: fence_site identifies peers: node2, node3
 T+2s: fence_site sets terminate on node1, node2, node3
 T+3s: fence_site returns success
-T+4s: fence-ipmilan-node1 fences node1 (complete)
+T+4s: <real-fence-device> fences node1 (complete)
 T+5s: Pacemaker schedules node2, node3 fencing
-T+6s: fence-ipmilan-node2 + fence-ipmilan-node3 run in parallel
+T+6s: <real-fence-device> runs in parallel for node2 and node3
 T+7s: All siteA nodes fenced (complete)
       node4, node5 (siteB) operational
 ```
@@ -444,7 +444,7 @@ T+1s: fence_site identifies peers: node2, node3
 T+2s: fence_site sets terminate on node1, node2, node3
 T+3s: fence_site returns FAILURE (intentional)
 T+4s: Pacemaker reschedules: node1 + node2 + node3 fencing
-T+5s: fence-ipmilan-node1 + node2 + node3 run in parallel
+T+5s: <real-fence-device> runs in parallel for node1 + node2 + node3
 T+6s: All siteA nodes fenced (complete)
       node4, node5 (siteB) operational
 ```
@@ -505,7 +505,7 @@ pcs stonith level
 
 # Fix: Add fence_site WITH real device
 pcs stonith level clear
-pcs stonith level add 1 node1 fence-site fence-ipmilan-node1
+pcs stonith level add 1 node1 fence-site <real-fence-device>
 ```
 
 ### Issue: Self-Fencing
